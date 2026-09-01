@@ -1,2 +1,8 @@
+from lecture_util.cli import app
+
+
 def main() -> None:
-    print("Hello from lecture-util!")
+    app()
+
+
+__all__ = ["app", "main"]
