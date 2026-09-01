@@ -35,6 +35,16 @@ class RunStateTests(unittest.TestCase):
             self.assertIn('"status": "failed"', content)
             self.assertNotIn("api_key", content)
 
+    def test_tags_replace_only_when_explicitly_supplied(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            url = "https://example.com/index.m3u8"
+            paths, _ = create_workspace(url, Path(directory), tags=["first"])
+            _, preserved = create_workspace(url, Path(directory), tags=None)
+            self.assertEqual(preserved.data["tags"], ["first"])
+            _, replaced = create_workspace(url, Path(directory), tags=["second"])
+            self.assertEqual(replaced.data["tags"], ["second"])
+            self.assertEqual(paths.root, replaced.paths.root)
+
 
 if __name__ == "__main__":
     unittest.main()

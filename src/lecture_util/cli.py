@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 from collections.abc import Callable
+import os
+from pathlib import Path
+import sys
 
 import typer
 from rich.console import Console
@@ -9,7 +11,8 @@ from rich.table import Table
 
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
-from lecture_util.models import LecturePaths
+from lecture_util.media import validate_hls_url
+from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
 from lecture_util.state import RunState, create_workspace
 from lecture_util.summarizers import create_summarizer
@@ -17,7 +20,7 @@ from lecture_util.summary import DEFAULT_PROMPT, summary_stage
 from lecture_util.transcription import load_transcript
 
 
-app = typer.Typer(no_args_is_help=True, pretty_exceptions_show_locals=False)
+app = typer.Typer(invoke_without_command=True, no_args_is_help=False, pretty_exceptions_show_locals=False)
 console = Console()
 
 
@@ -40,10 +43,23 @@ def _resolve_prompt(prompt: str | None, prompt_file: Path | None) -> str:
     return prompt if prompt is not None else DEFAULT_PROMPT
 
 
+def normalize_tags(values: list[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    normalized: list[str] = []
+    for value in values:
+        for candidate in value.split(","):
+            tag = candidate.strip()
+            if tag and tag not in normalized:
+                normalized.append(tag)
+    return normalized
+
+
 def _read_urls(url: str | None, input_file: Path | None) -> list[str]:
     if (url is None) == (input_file is None):
         raise LectureUtilError("Provide exactly one URL or --input URL_LIST_FILE.")
     if url is not None:
+        validate_hls_url(url)
         return [url]
     try:
         lines = input_file.read_text(encoding="utf-8").splitlines()  # type: ignore[union-attr]
@@ -52,7 +68,161 @@ def _read_urls(url: str | None, input_file: Path | None) -> list[str]:
     urls = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
     if not urls:
         raise LectureUtilError("The URL list does not contain any lecture URLs.")
+    for lecture_url in urls:
+        validate_hls_url(lecture_url)
     return urls
+
+
+def _execute_run(options: RunOptions) -> None:
+    summarizer = create_summarizer(
+        options.summarizer,
+        model=options.llm_model,
+        base_url=options.base_url,
+        api_key_env=options.api_key_env,
+    )
+    failures: list[tuple[str, str]] = []
+    for lecture_url in options.urls:
+        try:
+            paths = run_lecture(
+                lecture_url,
+                options.output_dir,
+                summarizer,
+                title=options.title,
+                tags=options.tags,
+                model=options.whisper_model,
+                language=options.language,
+                device=options.device,
+                prompt=options.prompt,
+                chunk_chars=options.chunk_chars,
+                force=options.force,
+            )
+            console.print(f"[green]Complete[/green] {paths.root}")
+        except Exception as error:
+            failures.append((lecture_url, str(error)))
+            console.print(f"[red]Failed[/red] {lecture_url}: {error}")
+    if failures:
+        raise LectureUtilError(f"{len(failures)} of {len(options.urls)} lectures failed.")
+
+
+def _choice(prompt: str, choices: tuple[str, ...], default: str) -> str:
+    rendered = "/".join(choices)
+    while True:
+        answer = typer.prompt(f"{prompt} [{rendered}]", default=default).strip().lower()
+        if answer in choices:
+            return answer
+        console.print(f"[yellow]Choose one of: {rendered}[/yellow]")
+
+
+def _optional_prompt(label: str) -> str | None:
+    value = typer.prompt(label, default="", show_default=False).strip()
+    return value or None
+
+
+def _interactive_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _interactive_options() -> RunOptions:
+    console.print("[bold]lecture-util interactive setup[/bold]")
+    source_mode = _choice("Lecture source", ("single", "list"), "single")
+    if source_mode == "single":
+        source_url = typer.prompt("Public .m3u8 URL").strip()
+        urls = _read_urls(source_url, None)
+    else:
+        input_path = Path(typer.prompt("URL list file").strip()).expanduser()
+        urls = _read_urls(None, input_path)
+
+    title = _optional_prompt("Optional title")
+    raw_tags = _optional_prompt("Tags (comma-separated, optional)")
+    tags = normalize_tags([raw_tags] if raw_tags is not None else None)
+    output_dir = Path(typer.prompt("Output directory", default="output")).expanduser()
+    force = typer.confirm("Force every stage to run again?", default=False)
+
+    device = _choice("Transcription device", ("auto", "mlx", "cuda", "cpu"), "auto")
+    whisper_model = typer.prompt("Whisper model", default="large-v3").strip()
+    language = typer.prompt("Lecture language", default="auto").strip()
+
+    backend = _choice("Summarizer", ("openai", "ollama", "codex", "opencode"), "ollama")
+    api_key_env = "OPENAI_API_KEY"
+    if backend == "openai":
+        base_url = typer.prompt("OpenAI-compatible base URL", default="https://api.openai.com/v1").strip()
+        llm_model = typer.prompt("LLM model").strip()
+        api_key_env = typer.prompt("API key environment variable", default="OPENAI_API_KEY").strip()
+        if not os.environ.get(api_key_env):
+            raise LectureUtilError(
+                f"Environment variable {api_key_env} is not set. Set it before starting the pipeline."
+            )
+    elif backend == "ollama":
+        base_url = typer.prompt("Ollama base URL", default="http://localhost:11434").strip()
+        llm_model = typer.prompt("Ollama model").strip()
+    else:
+        base_url = None
+        llm_model = _optional_prompt(f"{backend} model (blank uses its configured default)")
+
+    prompt_mode = _choice("Summary prompt", ("default", "inline", "file"), "default")
+    if prompt_mode == "inline":
+        selected_prompt = typer.prompt("Summary instructions").strip()
+    elif prompt_mode == "file":
+        prompt_path = Path(typer.prompt("Prompt file").strip()).expanduser()
+        selected_prompt = _resolve_prompt(None, prompt_path)
+    else:
+        selected_prompt = DEFAULT_PROMPT
+
+    if typer.confirm("Configure advanced options?", default=False):
+        chunk_chars = typer.prompt("Summary chunk size in characters", default=12_000, type=int)
+        if chunk_chars < 1000:
+            raise LectureUtilError("Summary chunk size must be at least 1000 characters.")
+    else:
+        chunk_chars = 12_000
+
+    options = RunOptions(
+        urls=urls,
+        summarizer=backend,
+        llm_model=llm_model,
+        base_url=base_url,
+        api_key_env=api_key_env,
+        output_dir=output_dir,
+        title=title,
+        tags=tags,
+        whisper_model=whisper_model,
+        language=language,
+        device=device,
+        prompt=selected_prompt,
+        chunk_chars=chunk_chars,
+        force=force,
+    )
+    table = Table("Option", "Value", title="Execution plan")
+    table.add_row("Lectures", str(len(options.urls)))
+    table.add_row("Output", str(options.output_dir))
+    table.add_row("Tags", ", ".join(options.tags or []) or "(none)")
+    table.add_row("Transcription", f"{options.whisper_model} on {options.device}; {options.language}")
+    table.add_row("Summarizer", f"{options.summarizer} / {options.llm_model or '(configured default)'}")
+    if options.summarizer == "openai":
+        table.add_row("API key", f"environment variable {options.api_key_env} (set)")
+    table.add_row("Chunk size", str(options.chunk_chars))
+    table.add_row("Force", "yes" if options.force else "no")
+    console.print(table)
+    return options
+
+
+@app.callback()
+def root_callback(ctx: typer.Context) -> None:
+    """Download, transcribe, and summarize LMS lectures."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if not _interactive_terminal():
+        console.print("[red]Error:[/red] no command supplied and stdin/stdout are not interactive.")
+        console.print("Run 'lecture-util --help' for usage.")
+        raise typer.Exit(2)
+    try:
+        options = _interactive_options()
+        if not typer.confirm("Start processing?", default=True):
+            console.print("Cancelled before processing.")
+            return
+        _execute_run(options)
+    except LectureUtilError as error:
+        console.print(f"[red]Error:[/red] {error}")
+        raise typer.Exit(1) from error
 
 
 @app.command("run")
@@ -79,34 +249,24 @@ def run_command(
     def action() -> None:
         urls = _read_urls(url, input_file)
         selected_prompt = _resolve_prompt(prompt, prompt_file)
-        summarizer = create_summarizer(
-            summarizer_name,
-            model=llm_model,
-            base_url=base_url,
-            api_key_env=api_key_env,
+        _execute_run(
+            RunOptions(
+                urls=urls,
+                summarizer=summarizer_name,
+                llm_model=llm_model,
+                base_url=base_url,
+                api_key_env=api_key_env,
+                output_dir=output_dir,
+                title=title,
+                tags=normalize_tags(tag),
+                whisper_model=whisper_model,
+                language=language,
+                device=device,
+                prompt=selected_prompt,
+                chunk_chars=chunk_chars,
+                force=force,
+            )
         )
-        failures: list[tuple[str, str]] = []
-        for lecture_url in urls:
-            try:
-                paths = run_lecture(
-                    lecture_url,
-                    output_dir,
-                    summarizer,
-                    title=title,
-                    tags=tag,
-                    model=whisper_model,
-                    language=language,
-                    device=device,
-                    prompt=selected_prompt,
-                    chunk_chars=chunk_chars,
-                    force=force,
-                )
-                console.print(f"[green]Complete[/green] {paths.root}")
-            except Exception as error:
-                failures.append((lecture_url, str(error)))
-                console.print(f"[red]Failed[/red] {lecture_url}: {error}")
-        if failures:
-            raise LectureUtilError(f"{len(failures)} of {len(urls)} lectures failed.")
 
     _run_or_exit(action)
 
@@ -116,12 +276,13 @@ def download_command(
     url: str = typer.Argument(..., help="Public .m3u8 URL"),
     output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o"),
     title: str | None = typer.Option(None, "--title"),
+    tag: list[str] | None = typer.Option(None, "--tag"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Download a lecture and extract transcription-ready audio."""
 
     def action() -> None:
-        paths, state = create_workspace(url, output_dir, title=title)
+        paths, state = create_workspace(url, output_dir, title=title, tags=normalize_tags(tag))
         download_stage(paths, state, force=force)
         audio_stage(paths, state, force=force)
         console.print(f"[green]Prepared[/green] {paths.root}")

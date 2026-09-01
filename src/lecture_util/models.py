@@ -67,3 +67,21 @@ class LecturePaths:
         self.summary = self.root / "summary.md"
         self.state = self.root / "run.json"
         self.summary_work = self.root / "work" / "summary-chunks"
+
+
+@dataclass(slots=True)
+class RunOptions:
+    urls: list[str]
+    summarizer: str
+    llm_model: str | None
+    base_url: str | None
+    api_key_env: str
+    output_dir: Path
+    title: str | None
+    tags: list[str] | None
+    whisper_model: str
+    language: str
+    device: str
+    prompt: str
+    chunk_chars: int
+    force: bool

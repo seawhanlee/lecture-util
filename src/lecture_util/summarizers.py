@@ -199,6 +199,10 @@ def create_summarizer(
     if backend == "openai":
         if not model:
             raise LectureUtilError("--llm-model is required for the OpenAI-compatible backend.")
+        if not os.environ.get(api_key_env):
+            raise LectureUtilError(
+                f"Environment variable {api_key_env} is not set for the OpenAI-compatible API."
+            )
         return OpenAIChatSummarizer(
             model=model,
             base_url=base_url or "https://api.openai.com/v1",
