@@ -30,6 +30,9 @@ def _run_or_exit(action: Callable[[], None]) -> None:
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
+    except Exception as error:
+        console.print(f"[red]Error:[/red] {error}")
+        raise typer.Exit(1) from error
 
 
 def _resolve_prompt(prompt: str | None, prompt_file: Path | None) -> str:
@@ -282,6 +285,7 @@ def download_command(
     """Download a lecture and extract transcription-ready audio."""
 
     def action() -> None:
+        validate_hls_url(url)
         paths, state = create_workspace(url, output_dir, title=title, tags=normalize_tags(tag))
         download_stage(paths, state, force=force)
         audio_stage(paths, state, force=force)

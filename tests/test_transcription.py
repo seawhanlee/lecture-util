@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from lecture_util.models import Segment, Transcript
 from lecture_util.transcription import (
+    detect_device,
     format_timestamp,
     is_out_of_memory,
     transcript_srt,
@@ -70,6 +71,18 @@ class TranscriptionTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "bad model"):
                     transcribe_audio(audio)
             self.assertEqual(transcribe.call_count, 1)
+
+    def test_explicit_cpu_is_always_allowed(self) -> None:
+        with patch("lecture_util.transcription.platform.system", return_value="Plan9"):
+            self.assertEqual(detect_device("cpu"), "cpu")
+
+    def test_mlx_is_rejected_outside_apple_silicon(self) -> None:
+        with (
+            patch("lecture_util.transcription.platform.system", return_value="Linux"),
+            patch("lecture_util.transcription.platform.machine", return_value="x86_64"),
+        ):
+            with self.assertRaisesRegex(Exception, "Apple Silicon"):
+                detect_device("mlx")
 
 
 if __name__ == "__main__":

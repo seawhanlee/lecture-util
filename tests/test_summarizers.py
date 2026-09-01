@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -19,6 +20,11 @@ class SummarizerTests(unittest.TestCase):
         with self.assertRaisesRegex(LectureUtilError, "--llm-model"):
             create_summarizer("ollama", model=None)
         self.assertEqual(create_summarizer("codex", model=None).name, "codex")
+
+    def test_openai_backend_validates_key_before_pipeline(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(LectureUtilError, "OPENAI_API_KEY"):
+                create_summarizer("openai", model="test-model")
 
     def test_ollama_native_chat_request(self) -> None:
         response = Mock()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lecture_util.media import download_hls, extract_audio
+from lecture_util.media import download_hls, extract_audio, tool_version
 from lecture_util.models import LecturePaths, Transcript
 from lecture_util.state import RunState, create_workspace
 from lecture_util.summarizers import Summarizer
@@ -19,7 +19,12 @@ def download_stage(paths: LecturePaths, state: RunState, *, force: bool = False)
     except BaseException as error:
         state.fail_stage("download", error)
         raise
-    state.complete_stage("download", output=str(paths.video))
+    state.complete_stage(
+        "download",
+        output=str(paths.video),
+        yt_dlp_version=tool_version("yt-dlp"),
+        ffmpeg_version=tool_version("ffmpeg"),
+    )
 
 
 def audio_stage(paths: LecturePaths, state: RunState, *, force: bool = False) -> None:
@@ -43,7 +48,18 @@ def transcription_stage(
     device: str = "auto",
     force: bool = False,
 ) -> Transcript:
-    if not force and state.stage_complete("transcription") and paths.transcript_json.is_file():
+    previous = state.data.get("stages", {}).get("transcription", {})
+    same_options = (
+        previous.get("requested_model") == model
+        and previous.get("requested_language") == language
+        and previous.get("requested_device") == device
+    )
+    if (
+        not force
+        and state.stage_complete("transcription")
+        and same_options
+        and paths.transcript_json.is_file()
+    ):
         from lecture_util.transcription import load_transcript
 
         return load_transcript(paths.transcript_json)

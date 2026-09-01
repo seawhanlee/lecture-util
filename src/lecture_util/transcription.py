@@ -23,32 +23,45 @@ MLX_MODELS = {
 def detect_device(requested: str = "auto") -> str:
     if requested not in {"auto", "mlx", "cuda", "cpu"}:
         raise LectureUtilError(f"Unsupported device: {requested}")
-    if requested != "auto":
-        return requested
     system = platform.system()
     machine = platform.machine().lower()
+    if requested == "cpu":
+        return requested
+    if requested == "mlx":
+        if system != "Darwin" or machine != "arm64":
+            raise DependencyError("The MLX device requires Apple Silicon macOS.")
+        return requested
+    if requested == "cuda":
+        if system != "Linux" or machine not in {"x86_64", "amd64"}:
+            raise DependencyError("The CUDA device requires x86_64 Linux with an NVIDIA GPU.")
+        _require_nvidia_gpu()
+        return requested
     if system == "Darwin" and machine == "arm64":
         return "mlx"
     if system == "Linux" and machine in {"x86_64", "amd64"}:
-        if not shutil.which("nvidia-smi"):
-            raise DependencyError(
-                "NVIDIA GPU was not detected. Install the NVIDIA driver or pass --device cpu explicitly."
-            )
-        probe = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if probe.returncode != 0 or not probe.stdout.strip():
-            raise DependencyError(
-                "NVIDIA GPU is not available. Fix the driver/runtime or pass --device cpu explicitly."
-            )
+        _require_nvidia_gpu()
         return "cuda"
     raise DependencyError(
         "Automatic acceleration is supported only on Apple Silicon macOS and NVIDIA x86_64 Linux. "
         "Pass --device cpu explicitly to use the CPU."
     )
+
+
+def _require_nvidia_gpu() -> None:
+    if not shutil.which("nvidia-smi"):
+        raise DependencyError(
+            "NVIDIA GPU was not detected. Install the NVIDIA driver or pass --device cpu explicitly."
+        )
+    probe = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        raise DependencyError(
+            "NVIDIA GPU is not available. Fix the driver/runtime or pass --device cpu explicitly."
+        )
 
 
 def engine_for_device(device: str) -> str:

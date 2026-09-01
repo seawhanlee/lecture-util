@@ -32,6 +32,19 @@ def run_command(argv: list[str]) -> None:
         raise CommandError(f"{argv[0]} exited with status {result.returncode}.")
 
 
+def tool_version(name: str) -> str:
+    executable = require_executable(name)
+    flag = "-version" if name == "ffmpeg" else "--version"
+    result = subprocess.run(
+        [executable, flag],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = result.stdout.strip() or result.stderr.strip()
+    return output.splitlines()[0] if output else "unknown"
+
+
 def download_hls(url: str, destination: Path) -> None:
     validate_hls_url(url)
     yt_dlp = require_executable("yt-dlp")

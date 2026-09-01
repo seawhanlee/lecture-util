@@ -1,7 +1,7 @@
 [project]
 name = "lecture-util"
 version = "0.1.0"
-description = "Add your description here"
+description = "Download HLS lectures, transcribe them locally with Whisper, and create LLM study notes"
 readme = "README.md"
 authors = [
     { name = "Seawhan Lee", email = "seawhanl@gmail.com" }
