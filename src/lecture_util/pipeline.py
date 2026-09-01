@@ -5,6 +5,8 @@ from pathlib import Path
 from lecture_util.media import download_hls, extract_audio
 from lecture_util.models import LecturePaths, Transcript
 from lecture_util.state import RunState, create_workspace
+from lecture_util.summarizers import Summarizer
+from lecture_util.summary import DEFAULT_PROMPT, summary_stage
 from lecture_util.transcription import save_transcript, transcribe_audio
 
 
@@ -97,3 +99,40 @@ def prepare_lecture(
         force=force,
     )
     return paths, state, transcript
+
+
+def run_lecture(
+    url: str,
+    output_dir: Path,
+    summarizer: Summarizer,
+    *,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    model: str = "large-v3",
+    language: str = "auto",
+    device: str = "auto",
+    prompt: str = DEFAULT_PROMPT,
+    chunk_chars: int = 12_000,
+    force: bool = False,
+) -> LecturePaths:
+    paths, state, transcript = prepare_lecture(
+        url,
+        output_dir,
+        title=title,
+        tags=tags,
+        model=model,
+        language=language,
+        device=device,
+        force=force,
+    )
+    summary_stage(
+        transcript,
+        paths.summary,
+        paths.summary_work,
+        state,
+        summarizer,
+        prompt=prompt,
+        chunk_chars=chunk_chars,
+        force=force,
+    )
+    return paths
