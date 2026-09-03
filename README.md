@@ -69,6 +69,28 @@ uv run lecture-util run URL --llm-model MODEL
 
 Codex는 비대화형 `codex exec`로 임시 읽기 전용 작업공간에서 실행되며, 전사문 요약 외의 도구 사용이나 파일 변경을 지시하지 않습니다.
 
+### 진행 상태
+
+실행 중에는 현재 강의와 단계, 캐시 재사용 여부, 파일 크기, 전사 모델·언어·세그먼트 수, Codex 요약 청크와 경과 시간을 표시합니다.
+
+```text
+──────────────────────────── Lecture 1/1 ────────────────────────────
+https://example.com/lecture/index.m3u8
+→ [1/4] Downloading HLS video
+✓ [1/4] Downloaded 96.8 MiB in 23.4s
+→ [2/4] Extracting 16 kHz mono audio
+✓ [2/4] Extracted 61.4 MiB in 0.9s
+→ [3/4] Transcribing with Whisper large-v3 on cuda (this may take several minutes)
+✓ [3/4] Created 282 segments in 2m 12s (faster-whisper/large-v3, ko)
+→ [4/4] Summarizing with Codex (2 transcript chunks)
+· [4/4] Summarizing transcript chunk 1/2 with Codex
+· [4/4] Merging notes 1/1 in round 1 with Codex
+✓ [4/4] Wrote summary in 1m 58s to output/lecture-0123456789/summary.md
+Complete output/lecture-0123456789 (4m 35s)
+```
+
+완료된 단계는 다음 실행에서 `↻` 기호와 함께 캐시 재사용으로 표시됩니다. 외부 명령의 장황한 정상 로그는 숨기지만, 실패하면 진단에 필요한 마지막 오류 내용은 출력합니다.
+
 ## 여러 강의와 사용자 프롬프트
 
 URL 목록은 한 줄에 하나씩 작성하며 빈 줄과 `#` 주석을 사용할 수 있습니다. 강의는 GPU 메모리 충돌을 피하도록 순차 처리됩니다.

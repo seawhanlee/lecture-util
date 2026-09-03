@@ -25,11 +25,13 @@ def validate_hls_url(url: str) -> None:
 
 def run_command(argv: list[str]) -> None:
     try:
-        result = subprocess.run(argv, check=False)
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
     except OSError as error:
         raise CommandError(f"Could not start {argv[0]}: {error}") from error
     if result.returncode != 0:
-        raise CommandError(f"{argv[0]} exited with status {result.returncode}.")
+        detail = (result.stderr.strip() or result.stdout.strip())[-2000:]
+        suffix = f"\n{detail}" if detail else ""
+        raise CommandError(f"{argv[0]} exited with status {result.returncode}.{suffix}")
 
 
 def tool_version(name: str) -> str:

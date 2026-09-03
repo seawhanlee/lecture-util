@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from time import monotonic
 
 from lecture_util.models import Transcript
+from lecture_util.progress import ProgressCallback, format_duration, report
 from lecture_util.state import RunState, atomic_write_text
 from lecture_util.summarizers import Summarizer
 from lecture_util.transcription import format_timestamp
@@ -87,6 +89,7 @@ def summarize_transcript(
     prompt: str = DEFAULT_PROMPT,
     chunk_chars: int = 12_000,
     use_cache: bool = True,
+    progress: ProgressCallback | None = None,
 ) -> tuple[str, str]:
     fingerprint = summary_fingerprint(transcript, summarizer, prompt, chunk_chars)
     fingerprint_dir = work_dir / fingerprint
@@ -99,8 +102,15 @@ def summarize_transcript(
     for index, chunk in enumerate(chunks, 1):
         cache = fingerprint_dir / f"chunk-{index:04d}.md"
         if use_cache and cache.is_file():
+            report(progress, "summary", "update", f"Reusing transcript chunk {index}/{len(chunks)}")
             notes.append(cache.read_text(encoding="utf-8"))
             continue
+        report(
+            progress,
+            "summary",
+            "update",
+            f"Summarizing transcript chunk {index}/{len(chunks)} with Codex",
+        )
         user_prompt = f"{prompt}\n\n```\n{chunk.rstrip()}\n```"
         note = summarizer.generate(DEVELOPER_PROMPT, user_prompt)
         atomic_write_text(cache, note.rstrip() + "\n")
@@ -114,8 +124,20 @@ def summarize_transcript(
         for index, group in enumerate(groups, 1):
             cache = fingerprint_dir / f"merge-{round_number:02d}-{index:04d}.md"
             if use_cache and cache.is_file():
+                report(
+                    progress,
+                    "summary",
+                    "update",
+                    f"Reusing merge {index}/{len(groups)} from round {round_number}",
+                )
                 merged.append(cache.read_text(encoding="utf-8"))
                 continue
+            report(
+                progress,
+                "summary",
+                "update",
+                f"Merging notes {index}/{len(groups)} in round {round_number} with Codex",
+            )
             user_prompt = f"{MERGE_PROMPT}\n\n```\n{group.rstrip()}\n```"
             note = summarizer.generate(DEVELOPER_PROMPT, user_prompt)
             atomic_write_text(cache, note.rstrip() + "\n")
@@ -138,6 +160,7 @@ def summary_stage(
     prompt: str = DEFAULT_PROMPT,
     chunk_chars: int = 12_000,
     force: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> str:
     fingerprint = summary_fingerprint(transcript, summarizer, prompt, chunk_chars)
     stage = state.data.get("stages", {}).get("summary", {})
@@ -147,7 +170,16 @@ def summary_stage(
         and stage.get("fingerprint") == fingerprint
         and summary_path.is_file()
     ):
+        report(progress, "summary", "cached", f"Reusing summary from {summary_path}")
         return summary_path.read_text(encoding="utf-8")
+    started = monotonic()
+    chunk_count = len(chunk_lines(transcript_lines(transcript), chunk_chars)) or 1
+    report(
+        progress,
+        "summary",
+        "start",
+        f"Summarizing with Codex ({chunk_count} transcript chunks)",
+    )
     state.start_stage(
         "summary",
         backend=summarizer.name,
@@ -163,10 +195,17 @@ def summary_stage(
             prompt=prompt,
             chunk_chars=chunk_chars,
             use_cache=not force,
+            progress=progress,
         )
         atomic_write_text(summary_path, summary)
     except BaseException as error:
         state.fail_stage("summary", error)
+        report(
+            progress,
+            "summary",
+            "failed",
+            f"Summarization failed after {format_duration(monotonic() - started)}",
+        )
         raise
     state.complete_stage(
         "summary",
@@ -174,5 +213,11 @@ def summary_stage(
         model=summarizer.model,
         fingerprint=fingerprint,
         output=str(summary_path),
+    )
+    report(
+        progress,
+        "summary",
+        "complete",
+        f"Wrote summary in {format_duration(monotonic() - started)} to {summary_path}",
     )
     return summary

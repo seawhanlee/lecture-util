@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lecture_util.models import Segment, Transcript
+from lecture_util.progress import ProgressEvent
 from lecture_util.summary import DEFAULT_PROMPT, MERGE_PROMPT, chunk_lines, summarize_transcript
 
 
@@ -43,8 +44,13 @@ class SummaryTests(unittest.TestCase):
     def test_summary_chunks_and_merges(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             summarizer = FakeSummarizer()
+            events: list[ProgressEvent] = []
             result, fingerprint = summarize_transcript(
-                sample_transcript(), summarizer, Path(directory), chunk_chars=1000
+                sample_transcript(),
+                summarizer,
+                Path(directory),
+                chunk_chars=1000,
+                progress=events.append,
             )
             self.assertTrue(result.startswith("# Note"))
             self.assertEqual(len(fingerprint), 16)
@@ -53,6 +59,8 @@ class SummaryTests(unittest.TestCase):
             self.assertIn("segment 0", summarizer.prompts[0])
             self.assertTrue(summarizer.prompts[0].endswith("```"))
             self.assertTrue(any(prompt.startswith(MERGE_PROMPT) for prompt in summarizer.prompts))
+            self.assertTrue(any("transcript chunk 1/" in event.message for event in events))
+            self.assertTrue(any("Merging notes" in event.message for event in events))
 
     def test_completed_chunks_are_reused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

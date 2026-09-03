@@ -3,24 +3,55 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import sys
+from time import monotonic
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
 from lecture_util.media import validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
+from lecture_util.progress import ProgressEvent, format_duration
 from lecture_util.state import RunState, create_workspace
 from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import DEFAULT_PROMPT, summary_stage
 from lecture_util.transcription import load_transcript
 
 
-app = typer.Typer(invoke_without_command=True, no_args_is_help=False, pretty_exceptions_show_locals=False)
+app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    pretty_exceptions_show_locals=False,
+)
 console = Console()
+
+
+class ConsoleProgressReporter:
+    def __init__(self, stages: tuple[str, ...]) -> None:
+        self.positions = {stage: index for index, stage in enumerate(stages, 1)}
+        self.total = len(stages)
+
+    def __call__(self, event: ProgressEvent) -> None:
+        marker, style = {
+            "start": ("→", "cyan"),
+            "update": ("·", "blue"),
+            "complete": ("✓", "green"),
+            "cached": ("↻", "dim"),
+            "warning": ("!", "yellow"),
+            "failed": ("✗", "red"),
+        }[event.status]
+        position = self.positions.get(event.stage)
+        prefix = f"[{position}/{self.total}]" if position is not None else ""
+        line = Text()
+        line.append(f"{marker} ", style=style)
+        if prefix:
+            line.append(f"{prefix} ", style="bold")
+        line.append(event.message, style=style if event.status in {"failed", "warning"} else None)
+        console.print(line)
 
 
 def _run_or_exit(action: Callable[[], None]) -> None:
@@ -78,7 +109,11 @@ def _read_urls(url: str | None, input_file: Path | None) -> list[str]:
 def _execute_run(options: RunOptions) -> None:
     summarizer = CodexSummarizer(model=options.llm_model)
     failures: list[tuple[str, str]] = []
-    for lecture_url in options.urls:
+    for index, lecture_url in enumerate(options.urls, 1):
+        console.rule(f"Lecture {index}/{len(options.urls)}")
+        console.print(lecture_url)
+        started = monotonic()
+        progress = ConsoleProgressReporter(("download", "audio", "transcription", "summary"))
         try:
             paths = run_lecture(
                 lecture_url,
@@ -92,8 +127,12 @@ def _execute_run(options: RunOptions) -> None:
                 prompt=options.prompt,
                 chunk_chars=options.chunk_chars,
                 force=options.force,
+                progress=progress,
             )
-            console.print(f"[green]Complete[/green] {paths.root}")
+            console.print(
+                f"[bold green]Complete[/bold green] {paths.root} "
+                f"({format_duration(monotonic() - started)})"
+            )
         except Exception as error:
             failures.append((lecture_url, str(error)))
             console.print(f"[red]Failed[/red] {lecture_url}: {error}")
@@ -255,8 +294,9 @@ def download_command(
     def action() -> None:
         validate_hls_url(url)
         paths, state = create_workspace(url, output_dir, title=title, tags=normalize_tags(tag))
-        download_stage(paths, state, force=force)
-        audio_stage(paths, state, force=force)
+        progress = ConsoleProgressReporter(("download", "audio"))
+        download_stage(paths, state, force=force, progress=progress)
+        audio_stage(paths, state, force=force, progress=progress)
         console.print(f"[green]Prepared[/green] {paths.root}")
 
     _run_or_exit(action)
@@ -282,6 +322,7 @@ def transcribe_command(
             language=language,
             device=device,
             force=force,
+            progress=ConsoleProgressReporter(("transcription",)),
         )
         console.print(
             f"[green]Transcribed[/green] {len(transcript.segments)} segments with "
@@ -315,6 +356,7 @@ def summarize_command(
             prompt=_resolve_prompt(prompt, prompt_file),
             chunk_chars=chunk_chars,
             force=force,
+            progress=ConsoleProgressReporter(("summary",)),
         )
         console.print(f"[green]Summarized[/green] {paths.summary}")
 

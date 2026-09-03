@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from lecture_util.models import Segment, Transcript
 from lecture_util.pipeline import transcription_stage
+from lecture_util.progress import ProgressEvent
 from lecture_util.state import create_workspace
 from lecture_util.transcription import save_transcript
 
@@ -41,6 +42,7 @@ class PipelineTests(unittest.TestCase):
             )
             state.complete_stage("transcription")
 
+            events: list[ProgressEvent] = []
             with patch("lecture_util.pipeline.transcribe_audio") as transcribe:
                 reused = transcription_stage(
                     paths,
@@ -48,9 +50,11 @@ class PipelineTests(unittest.TestCase):
                     model="large-v3",
                     language="auto",
                     device="cpu",
+                    progress=events.append,
                 )
             transcribe.assert_not_called()
             self.assertEqual(reused.segments[0].text, "existing")
+            self.assertEqual(events[-1].status, "cached")
 
             replacement = Transcript(
                 language="en",
@@ -60,16 +64,21 @@ class PipelineTests(unittest.TestCase):
                 effective_model="large-v3",
                 segments=[Segment(0, 1, "replacement")],
             )
-            with patch("lecture_util.pipeline.transcribe_audio", return_value=replacement) as transcribe:
+            events.clear()
+            with patch(
+                "lecture_util.pipeline.transcribe_audio", return_value=replacement
+            ) as transcribe:
                 result = transcription_stage(
                     paths,
                     state,
                     model="large-v3",
                     language="en",
                     device="cpu",
+                    progress=events.append,
                 )
             transcribe.assert_called_once()
             self.assertEqual(result.segments[0].text, "replacement")
+            self.assertEqual([event.status for event in events], ["start", "complete"])
 
 
 if __name__ == "__main__":
