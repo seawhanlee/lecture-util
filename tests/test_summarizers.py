@@ -31,10 +31,15 @@ class SummarizerTests(unittest.TestCase):
         response.raise_for_status.return_value = None
         response.json.return_value = {"message": {"content": "summary"}}
         with patch("lecture_util.summarizers.httpx.post", return_value=response) as post:
-            result = OllamaSummarizer("qwen", "http://localhost:11434/api").generate("dev", "user")
+            result = OllamaSummarizer("qwen", "http://localhost:11434/api").generate(
+                "developer", "이 강의를 요약해\n\n```\nlecture contents\n```"
+            )
         self.assertEqual(result, "summary")
         self.assertEqual(post.call_args.args[0], "http://localhost:11434/api/chat")
         self.assertFalse(post.call_args.kwargs["json"]["stream"])
+        messages = post.call_args.kwargs["json"]["messages"]
+        self.assertEqual(messages[0]["content"], "developer")
+        self.assertEqual(messages[1]["content"], "이 강의를 요약해\n\n```\nlecture contents\n```")
 
     def test_opencode_jsonl_parser_ignores_non_text_events(self) -> None:
         output = "\n".join(

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lecture_util.models import Segment, Transcript
-from lecture_util.summary import chunk_lines, summarize_transcript
+from lecture_util.summary import DEFAULT_PROMPT, MERGE_PROMPT, chunk_lines, summarize_transcript
 
 
 @dataclass
@@ -49,7 +49,10 @@ class SummaryTests(unittest.TestCase):
             self.assertTrue(result.startswith("# Note"))
             self.assertEqual(len(fingerprint), 16)
             self.assertGreater(len(summarizer.prompts), 1)
-            self.assertTrue(any("Merge the partial" in prompt for prompt in summarizer.prompts))
+            self.assertTrue(summarizer.prompts[0].startswith(f"{DEFAULT_PROMPT}\n\n```\n"))
+            self.assertIn("segment 0", summarizer.prompts[0])
+            self.assertTrue(summarizer.prompts[0].endswith("```"))
+            self.assertTrue(any(prompt.startswith(MERGE_PROMPT) for prompt in summarizer.prompts))
 
     def test_completed_chunks_are_reused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -64,6 +67,9 @@ class SummaryTests(unittest.TestCase):
             )
             self.assertEqual(first_result, second_result)
             self.assertEqual(second.prompts, [])
+
+    def test_default_user_prompt_is_exact_korean_request(self) -> None:
+        self.assertEqual(DEFAULT_PROMPT, "이 강의를 요약해")
 
 
 if __name__ == "__main__":

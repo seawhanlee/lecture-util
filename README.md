@@ -116,7 +116,7 @@ uv run lecture-util run --input lectures.txt \
   --tag week-1
 ```
 
-기본 요약은 강의 언어로 개요, 시간대별 목차, 핵심 개념, 상세 요점, 용어와 복습 질문을 생성합니다. 다음 옵션 중 하나로 완전히 교체할 수 있습니다.
+기본 요약은 `이 강의를 요약해`라는 요청 뒤에 녹취록을 Markdown 코드 펜스로 감싼 plain text 사용자 프롬프트를 전달합니다. 다음 옵션 중 하나로 요청 문구를 교체할 수 있습니다.
 
 ```bash
 uv run lecture-util run URL --summarizer codex \
@@ -126,7 +126,7 @@ uv run lecture-util run URL --summarizer codex \
   --prompt-file prompts/exam-notes.md
 ```
 
-긴 전사문은 기본 12,000자 단위로 나누어 요약한 뒤 재귀적으로 병합합니다. `--chunk-chars`로 조정할 수 있습니다.
+긴 전사문은 기본 12,000자 단위로 나누고 각 부분을 ` ``` ` 코드 펜스로 감싸 요약한 뒤, 부분 요약도 같은 방식으로 재귀적으로 병합합니다. `--chunk-chars`로 크기를 조정할 수 있습니다.
 
 ## 단계별 명령과 결과
 
