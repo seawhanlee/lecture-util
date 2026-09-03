@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import os
 from pathlib import Path
 import sys
 
@@ -15,7 +14,7 @@ from lecture_util.media import validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
 from lecture_util.state import RunState, create_workspace
-from lecture_util.summarizers import create_summarizer
+from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import DEFAULT_PROMPT, summary_stage
 from lecture_util.transcription import load_transcript
 
@@ -77,12 +76,7 @@ def _read_urls(url: str | None, input_file: Path | None) -> list[str]:
 
 
 def _execute_run(options: RunOptions) -> None:
-    summarizer = create_summarizer(
-        options.summarizer,
-        model=options.llm_model,
-        base_url=options.base_url,
-        api_key_env=options.api_key_env,
-    )
+    summarizer = CodexSummarizer(model=options.llm_model)
     failures: list[tuple[str, str]] = []
     for lecture_url in options.urls:
         try:
@@ -145,22 +139,7 @@ def _interactive_options() -> RunOptions:
     whisper_model = typer.prompt("Whisper model", default="large-v3").strip()
     language = typer.prompt("Lecture language", default="auto").strip()
 
-    backend = _choice("Summarizer", ("openai", "ollama", "codex", "opencode"), "ollama")
-    api_key_env = "OPENAI_API_KEY"
-    if backend == "openai":
-        base_url = typer.prompt("OpenAI-compatible base URL", default="https://api.openai.com/v1").strip()
-        llm_model = typer.prompt("LLM model").strip()
-        api_key_env = typer.prompt("API key environment variable", default="OPENAI_API_KEY").strip()
-        if not os.environ.get(api_key_env):
-            raise LectureUtilError(
-                f"Environment variable {api_key_env} is not set. Set it before starting the pipeline."
-            )
-    elif backend == "ollama":
-        base_url = typer.prompt("Ollama base URL", default="http://localhost:11434").strip()
-        llm_model = typer.prompt("Ollama model").strip()
-    else:
-        base_url = None
-        llm_model = _optional_prompt(f"{backend} model (blank uses its configured default)")
+    llm_model = _optional_prompt("Codex model (blank uses its configured default)")
 
     prompt_mode = _choice("Summary prompt", ("default", "inline", "file"), "default")
     if prompt_mode == "inline":
@@ -180,10 +159,7 @@ def _interactive_options() -> RunOptions:
 
     options = RunOptions(
         urls=urls,
-        summarizer=backend,
         llm_model=llm_model,
-        base_url=base_url,
-        api_key_env=api_key_env,
         output_dir=output_dir,
         title=title,
         tags=tags,
@@ -199,9 +175,7 @@ def _interactive_options() -> RunOptions:
     table.add_row("Output", str(options.output_dir))
     table.add_row("Tags", ", ".join(options.tags or []) or "(none)")
     table.add_row("Transcription", f"{options.whisper_model} on {options.device}; {options.language}")
-    table.add_row("Summarizer", f"{options.summarizer} / {options.llm_model or '(configured default)'}")
-    if options.summarizer == "openai":
-        table.add_row("API key", f"environment variable {options.api_key_env} (set)")
+    table.add_row("Summarizer", f"Codex / {options.llm_model or '(configured default)'}")
     table.add_row("Chunk size", str(options.chunk_chars))
     table.add_row("Force", "yes" if options.force else "no")
     console.print(table)
@@ -232,10 +206,7 @@ def root_callback(ctx: typer.Context) -> None:
 def run_command(
     url: str | None = typer.Argument(None, help="Public .m3u8 URL"),
     input_file: Path | None = typer.Option(None, "--input", exists=True, dir_okay=False),
-    summarizer_name: str = typer.Option(..., "--summarizer"),
     llm_model: str | None = typer.Option(None, "--llm-model"),
-    base_url: str | None = typer.Option(None, "--base-url"),
-    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
     output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o"),
     title: str | None = typer.Option(None, "--title"),
     tag: list[str] | None = typer.Option(None, "--tag"),
@@ -255,10 +226,7 @@ def run_command(
         _execute_run(
             RunOptions(
                 urls=urls,
-                summarizer=summarizer_name,
                 llm_model=llm_model,
-                base_url=base_url,
-                api_key_env=api_key_env,
                 output_dir=output_dir,
                 title=title,
                 tags=normalize_tags(tag),
@@ -326,10 +294,7 @@ def transcribe_command(
 @app.command("summarize")
 def summarize_command(
     lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False),
-    summarizer_name: str = typer.Option(..., "--summarizer"),
     llm_model: str | None = typer.Option(None, "--llm-model"),
-    base_url: str | None = typer.Option(None, "--base-url"),
-    api_key_env: str = typer.Option("OPENAI_API_KEY", "--api-key-env"),
     prompt: str | None = typer.Option(None, "--prompt"),
     prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
     chunk_chars: int = typer.Option(12_000, "--chunk-chars", min=1000),
@@ -340,12 +305,7 @@ def summarize_command(
     def action() -> None:
         paths = LecturePaths(lecture_dir)
         state = RunState(paths)
-        summarizer = create_summarizer(
-            summarizer_name,
-            model=llm_model,
-            base_url=base_url,
-            api_key_env=api_key_env,
-        )
+        summarizer = CodexSummarizer(model=llm_model)
         summary_stage(
             load_transcript(paths.transcript_json),
             paths.summary,

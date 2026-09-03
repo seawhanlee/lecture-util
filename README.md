@@ -5,7 +5,7 @@
 - `yt-dlp`로 HLS 영상을 MP4로 다운로드
 - `ffmpeg`로 16 kHz mono WAV 추출
 - Apple Silicon에서는 `mlx-whisper`, NVIDIA Linux에서는 `faster-whisper`
-- OpenAI 호환 API, Ollama, Codex, OpenCode 요약
+- Codex CLI를 사용한 요약
 - 원본 영상, 오디오, 타임스탬프 전사, SRT, 요약과 실행 상태 보존
 - 실패한 단계부터 재개
 
@@ -13,7 +13,7 @@
 
 ## 설치
 
-Python 3.12 이상과 [uv](https://docs.astral.sh/uv/)가 필요합니다.
+Python 3.12 이상, [uv](https://docs.astral.sh/uv/), 로그인된 Codex CLI가 필요합니다.
 
 ### Apple Silicon macOS
 
@@ -26,7 +26,7 @@ uv sync --dev
 
 ### NVIDIA GPU Linux
 
-먼저 `ffmpeg`, `yt-dlp`, NVIDIA 드라이버, CUDA 12와 cuDNN 9를 설치합니다. 최신 faster-whisper/CTranslate2 GPU 경로는 CUDA 12와 cuDNN 9를 요구합니다.
+먼저 `ffmpeg`, `yt-dlp`, NVIDIA 드라이버를 설치합니다. `uv sync`가 faster-whisper와 함께 Linux용 CUDA 12 및 cuDNN 9 런타임 패키지를 설치합니다.
 
 ```bash
 uv sync --dev
@@ -42,62 +42,32 @@ GPU를 사용할 수 없는 환경에서는 자동으로 CPU로 전환하지 않
 
 ## 인터랙티브 실행
 
-터미널에서 인자 없이 실행하면 입력 URL, 태그, Whisper 모델, 장치, 언어, 요약 백엔드와 프롬프트를 차례로 선택합니다.
+터미널에서 인자 없이 실행하면 입력 URL, 태그, Whisper 모델, 장치, 언어, Codex 모델과 프롬프트를 차례로 선택합니다.
 
 ```bash
 uv run lecture-util
 ```
 
-선택한 값은 현재 실행에만 사용됩니다. API 키는 입력하거나 저장하지 않고 지정한 환경변수에서 읽습니다. 파이프나 CI처럼 비대화형 환경에서 인자 없이 호출하면 대기하지 않고 종료합니다.
+선택한 값은 현재 실행에만 사용됩니다. 파이프나 CI처럼 비대화형 환경에서 인자 없이 호출하면 대기하지 않고 종료합니다.
 
 ## 비대화형 실행
 
-### Ollama
+### Codex 기본 실행
 
 ```bash
 uv run lecture-util run \
   'https://example.com/lecture/index.m3u8' \
-  --summarizer ollama \
-  --llm-model qwen3:8b \
   --tag operating-systems \
   --tag midterm
 ```
 
-기본 Ollama 주소는 `http://localhost:11434`입니다. 다른 서버는 `--base-url`로 지정합니다.
-
-### OpenAI 또는 OpenAI 호환 API
+요약에는 로그인된 Codex CLI를 사용합니다. Codex에 설정된 기본 모델 대신 특정 모델을 쓰려면 `--llm-model`을 지정합니다.
 
 ```bash
-export OPENAI_API_KEY='...'
-
-uv run lecture-util run \
-  'https://example.com/lecture/index.m3u8' \
-  --summarizer openai \
-  --llm-model YOUR_MODEL
+uv run lecture-util run URL --llm-model MODEL
 ```
 
-호환 서버를 사용할 때는 API 루트와 키가 담긴 환경변수 이름을 지정할 수 있습니다.
-
-```bash
-uv run lecture-util run URL \
-  --summarizer openai \
-  --base-url http://localhost:8000/v1 \
-  --api-key-env LOCAL_LLM_API_KEY \
-  --llm-model local-model
-```
-
-이 백엔드는 OpenAI 호환성을 위해 `POST /chat/completions`와 developer/user 메시지를 사용합니다.
-
-### Codex와 OpenCode
-
-각 CLI에서 먼저 로그인과 모델 설정을 마친 뒤 사용합니다. `--llm-model`을 생략하면 해당 도구의 기본 모델을 사용합니다.
-
-```bash
-uv run lecture-util run URL --summarizer codex
-uv run lecture-util run URL --summarizer opencode --llm-model provider/model
-```
-
-두 에이전트는 비대화형으로 임시 읽기 전용 작업공간에서 실행됩니다. 전사문 요약 외의 도구 사용이나 파일 변경을 지시하지 않습니다.
+Codex는 비대화형 `codex exec`로 임시 읽기 전용 작업공간에서 실행되며, 전사문 요약 외의 도구 사용이나 파일 변경을 지시하지 않습니다.
 
 ## 여러 강의와 사용자 프롬프트
 
@@ -111,18 +81,16 @@ https://example.com/lecture-2/index.m3u8
 
 ```bash
 uv run lecture-util run --input lectures.txt \
-  --summarizer ollama \
-  --llm-model qwen3:8b \
   --tag week-1
 ```
 
 기본 요약은 `이 강의를 요약해`라는 요청 뒤에 녹취록을 Markdown 코드 펜스로 감싼 plain text 사용자 프롬프트를 전달합니다. 다음 옵션 중 하나로 요청 문구를 교체할 수 있습니다.
 
 ```bash
-uv run lecture-util run URL --summarizer codex \
+uv run lecture-util run URL \
   --prompt '한국어로 시험 대비 요약과 예상 문제를 작성하라.'
 
-uv run lecture-util run URL --summarizer codex \
+uv run lecture-util run URL \
   --prompt-file prompts/exam-notes.md
 ```
 
@@ -133,7 +101,7 @@ uv run lecture-util run URL --summarizer codex \
 ```bash
 uv run lecture-util download URL --tag week-1
 uv run lecture-util transcribe output/lecture-0123456789
-uv run lecture-util summarize output/lecture-0123456789 --summarizer codex
+uv run lecture-util summarize output/lecture-0123456789
 ```
 
 강의마다 다음 파일을 만듭니다.
@@ -167,5 +135,4 @@ uv run pytest -q
 
 - [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- [OpenAI Chat Completions](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions)
-- [Ollama Chat API](https://docs.ollama.com/api/chat)
+- [Codex 비대화형 실행](https://learn.chatgpt.com/docs/non-interactive-mode)

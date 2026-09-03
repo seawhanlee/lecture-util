@@ -72,10 +72,7 @@ class LecturePaths:
 @dataclass(slots=True)
 class RunOptions:
     urls: list[str]
-    summarizer: str
     llm_model: str | None
-    base_url: str | None
-    api_key_env: str
     output_dir: Path
     title: str | None
     tags: list[str] | None

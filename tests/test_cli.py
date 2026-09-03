@@ -32,8 +32,6 @@ class CliTests(unittest.TestCase):
                 [
                     "run",
                     URL,
-                    "--summarizer",
-                    "codex",
                     "--tag",
                     " os,exam ",
                     "--tag",
@@ -44,6 +42,14 @@ class CliTests(unittest.TestCase):
         options = execute.call_args.args[0]
         self.assertEqual(options.tags, ["os", "exam"])
         self.assertEqual(options.urls, [URL])
+
+    def test_help_has_no_backend_or_api_options(self) -> None:
+        result = self.runner.invoke(app, ["run", "--help"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("--summarizer", result.output)
+        self.assertNotIn("--base-url", result.output)
+        self.assertNotIn("--api-key-env", result.output)
+        self.assertIn("--llm-model", result.output)
 
     def test_interactive_wizard_builds_shared_options(self) -> None:
         answers = "\n".join(
@@ -57,7 +63,6 @@ class CliTests(unittest.TestCase):
                 "cpu",
                 "",  # large-v3
                 "ko",
-                "codex",
                 "",  # configured model
                 "",  # default prompt
                 "n",  # advanced
@@ -76,7 +81,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(options.tags, ["os", "exam"])
         self.assertEqual(options.device, "cpu")
         self.assertEqual(options.language, "ko")
-        self.assertEqual(options.summarizer, "codex")
 
     def test_interactive_cancel_does_not_start_pipeline(self) -> None:
         answers = "\n".join(
@@ -90,7 +94,6 @@ class CliTests(unittest.TestCase):
                 "cpu",
                 "",
                 "",
-                "codex",
                 "",
                 "",
                 "n",
