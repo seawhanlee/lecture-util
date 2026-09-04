@@ -188,6 +188,10 @@ def prepare_lecture(
     output_dir: Path,
     *,
     title: str | None = None,
+    course: str | None = None,
+    lecture_date: str | None = None,
+    published_summary: Path | None = None,
+    published_transcript: Path | None = None,
     tags: list[str] | None = None,
     model: str = "large-v3",
     language: str = "auto",
@@ -195,7 +199,16 @@ def prepare_lecture(
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> tuple[LecturePaths, RunState, Transcript]:
-    paths, state = create_workspace(url, output_dir, title=title, tags=tags)
+    paths, state = create_workspace(
+        url,
+        output_dir,
+        title=title,
+        course=course,
+        lecture_date=lecture_date,
+        published_summary=published_summary,
+        published_transcript=published_transcript,
+        tags=tags,
+    )
     download_stage(paths, state, force=force, progress=progress)
     audio_stage(paths, state, force=force, progress=progress)
     transcript = transcription_stage(
@@ -216,6 +229,10 @@ def run_lecture(
     summarizer: Summarizer,
     *,
     title: str | None = None,
+    course: str | None = None,
+    lecture_date: str | None = None,
+    published_summary: Path | None = None,
+    published_transcript: Path | None = None,
     tags: list[str] | None = None,
     model: str = "large-v3",
     language: str = "auto",
@@ -228,6 +245,10 @@ def run_lecture(
         url,
         output_dir,
         title=title,
+        course=course,
+        lecture_date=lecture_date,
+        published_summary=published_summary,
+        published_transcript=published_transcript,
         tags=tags,
         model=model,
         language=language,

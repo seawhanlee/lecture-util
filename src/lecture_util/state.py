@@ -36,6 +36,10 @@ class RunState:
         *,
         url: str | None = None,
         title: str | None = None,
+        course: str | None = None,
+        lecture_date: str | None = None,
+        published_summary: Path | None = None,
+        published_transcript: Path | None = None,
         tags: list[str] | None = None,
     ) -> None:
         self.paths = paths
@@ -55,6 +59,14 @@ class RunState:
             self.data["url"] = url
         if title is not None:
             self.data["title"] = title
+        if course is not None:
+            self.data["course"] = course
+        if lecture_date is not None:
+            self.data["lecture_date"] = lecture_date
+        if published_summary is not None:
+            self.data["published_summary"] = str(published_summary)
+        if published_transcript is not None:
+            self.data["published_transcript"] = str(published_transcript)
         if tags is not None:
             self.data["tags"] = tags
         self.save()
@@ -108,8 +120,21 @@ def create_workspace(
     output_dir: Path,
     *,
     title: str | None = None,
+    course: str | None = None,
+    lecture_date: str | None = None,
+    published_summary: Path | None = None,
+    published_transcript: Path | None = None,
     tags: list[str] | None = None,
 ) -> tuple[LecturePaths, RunState]:
     paths = LecturePaths(output_dir / f"lecture-{lecture_id(url)}")
     paths.root.mkdir(parents=True, exist_ok=True)
-    return paths, RunState(paths, url=url, title=title, tags=tags)
+    return paths, RunState(
+        paths,
+        url=url,
+        title=title,
+        course=course,
+        lecture_date=lecture_date,
+        published_summary=published_summary,
+        published_transcript=published_transcript,
+        tags=tags,
+    )

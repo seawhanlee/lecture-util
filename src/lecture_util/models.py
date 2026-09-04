@@ -69,10 +69,11 @@ class LecturePaths:
 
 @dataclass(slots=True)
 class RunOptions:
-    urls: list[str]
+    url: str
+    course: str
+    lecture_date: str
+    title: str
     llm_model: str | None
-    output_dir: Path
-    title: str | None
     tags: list[str] | None
     whisper_model: str
     language: str

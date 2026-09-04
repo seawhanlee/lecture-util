@@ -15,6 +15,10 @@ class RunStateTests(unittest.TestCase):
                 "https://example.com/lecture/index.m3u8",
                 Path(directory),
                 title="Lecture",
+                course="Course",
+                lecture_date="2026-09-04",
+                published_summary=Path("note.md"),
+                published_transcript=Path("transcript.md"),
             )
             state.start_stage("download")
             state.complete_stage("download", output="source.mp4")
@@ -22,6 +26,10 @@ class RunStateTests(unittest.TestCase):
             reloaded = RunState(LecturePaths(paths.root))
             self.assertTrue(reloaded.stage_complete("download"))
             self.assertEqual(reloaded.data["title"], "Lecture")
+            self.assertEqual(reloaded.data["course"], "Course")
+            self.assertEqual(reloaded.data["lecture_date"], "2026-09-04")
+            self.assertEqual(reloaded.data["published_summary"], "note.md")
+            self.assertEqual(reloaded.data["published_transcript"], "transcript.md")
 
     def test_failure_is_recorded_without_secret_data(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

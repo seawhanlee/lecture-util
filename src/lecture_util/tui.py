@@ -23,6 +23,15 @@ from lecture_util.configuration import (
 )
 from lecture_util.errors import LectureUtilError
 from lecture_util.models import RunOptions
+from lecture_util.vault import (
+    DEFAULT_VAULT_ROOT,
+    discover_courses,
+    ensure_paths_available,
+    published_lecture_paths,
+    resolve_course,
+    validate_lecture_date,
+    validate_title,
+)
 
 
 class LectureSetupApp(App[RunOptions]):
@@ -86,24 +95,29 @@ class LectureSetupApp(App[RunOptions]):
     }
     """
 
+    def __init__(self, vault_root: Path = DEFAULT_VAULT_ROOT) -> None:
+        super().__init__()
+        self.vault_root = vault_root
+        self.courses = discover_courses(vault_root)
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="form"):
             yield Label("lecture-util", id="title")
-            yield Label("Lecture source", classes="field-label")
+            yield Label("Course", classes="field-label")
             yield Select(
-                (("Single .m3u8 URL", "single"), ("URL list file", "list")),
-                value="single",
+                tuple((course.name, course.name) for course in self.courses),
+                value=self.courses[0].name,
                 allow_blank=False,
-                id="source-mode",
+                id="course",
             )
-            yield Label("Public .m3u8 URL", id="source-label", classes="field-label")
+            yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
+            yield Input(placeholder="2026-09-04", id="lecture-date")
+            yield Label("Lecture title", classes="field-label")
+            yield Input(placeholder="압축성 유동", id="lecture-title")
+            yield Label("Public .m3u8 URL", classes="field-label")
             yield Input(placeholder="https://example.com/lecture/index.m3u8", id="source")
-            yield Label("Output directory", classes="field-label")
-            yield Input(value="output", id="output-dir")
 
             with Collapsible(title="Advanced settings", collapsed=True):
-                yield Label("Optional title", classes="field-label")
-                yield Input(id="lecture-title")
                 yield Label("Tags (comma-separated, optional)", classes="field-label")
                 yield Input(placeholder="operating-systems, midterm", id="tags")
                 yield Checkbox("Force every stage to run again", id="force")
@@ -145,14 +159,11 @@ class LectureSetupApp(App[RunOptions]):
             yield Button("Run", id="run")
 
     def on_mount(self) -> None:
-        self._update_source_mode()
         self._update_prompt_mode()
-        self.query_one("#source", Input).focus()
+        self.query_one("#lecture-date", Input).focus()
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "source-mode":
-            self._update_source_mode()
-        elif event.select.id == "prompt-mode":
+        if event.select.id == "prompt-mode":
             self._update_prompt_mode()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -166,17 +177,6 @@ class LectureSetupApp(App[RunOptions]):
 
     def _select_value(self, selector: str) -> str:
         return cast(str, self.query_one(selector, Select).value)
-
-    def _update_source_mode(self) -> None:
-        is_list = self._select_value("#source-mode") == "list"
-        label = self.query_one("#source-label", Label)
-        source = self.query_one("#source", Input)
-        label.update("URL list file" if is_list else "Public .m3u8 URL")
-        source.placeholder = (
-            "Path to URL list file"
-            if is_list
-            else "https://example.com/lecture/index.m3u8"
-        )
 
     def _update_prompt_mode(self) -> None:
         mode = self._select_value("#prompt-mode")
@@ -197,11 +197,16 @@ class LectureSetupApp(App[RunOptions]):
     def _build_options(self) -> RunOptions:
         source_value = self.query_one("#source", Input).value.strip()
         if not source_value:
-            raise LectureUtilError("Enter a lecture URL or URL list file.")
-        if self._select_value("#source-mode") == "list":
-            urls = read_urls(None, Path(source_value).expanduser())
-        else:
-            urls = read_urls(source_value, None)
+            raise LectureUtilError("Enter a lecture URL.")
+        url = read_urls(source_value, None)[0]
+
+        lecture_date = validate_lecture_date(
+            self.query_one("#lecture-date", Input).value
+        )
+        title = validate_title(self.query_one("#lecture-title", Input).value)
+        course_name = self._select_value("#course")
+        course = resolve_course(course_name, self.vault_root)
+        ensure_paths_available(published_lecture_paths(course, lecture_date, title))
 
         prompt_mode = self._select_value("#prompt-mode")
         if prompt_mode == "inline":
@@ -214,9 +219,6 @@ class LectureSetupApp(App[RunOptions]):
         else:
             prompt = resolve_prompt(None, None)
 
-        output_value = self.query_one("#output-dir", Input).value.strip()
-        if not output_value:
-            raise LectureUtilError("Enter an output directory.")
         whisper_model = self.query_one("#whisper-model", Input).value.strip()
         if not whisper_model:
             raise LectureUtilError("Enter a Whisper model.")
@@ -224,14 +226,14 @@ class LectureSetupApp(App[RunOptions]):
         if not language:
             raise LectureUtilError("Enter a lecture language.")
 
-        title = self.query_one("#lecture-title", Input).value.strip() or None
         raw_tags = self.query_one("#tags", Input).value.strip()
         llm_model = self.query_one("#llm-model", Input).value.strip() or None
         return RunOptions(
-            urls=urls,
-            llm_model=llm_model,
-            output_dir=Path(output_value).expanduser(),
+            url=url,
+            course=course_name,
+            lecture_date=lecture_date,
             title=title,
+            llm_model=llm_model,
             tags=normalize_tags([raw_tags] if raw_tags else None),
             whisper_model=whisper_model,
             language=language,

@@ -22,6 +22,16 @@ from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import summary_stage
 from lecture_util.transcription import load_transcript
 from lecture_util.tui import run_tui
+from lecture_util.vault import (
+    DEFAULT_VAULT_ROOT,
+    default_cache_root,
+    ensure_paths_available,
+    publish_lecture_notes,
+    published_lecture_paths,
+    resolve_course,
+    validate_lecture_date,
+    validate_title,
+)
 
 
 app = typer.Typer(
@@ -67,37 +77,53 @@ def _run_or_exit(action: Callable[[], None]) -> None:
         raise typer.Exit(1) from error
 
 
-def _execute_run(options: RunOptions) -> None:
-    failures: list[tuple[str, str]] = []
-    for index, lecture_url in enumerate(options.urls, 1):
-        summarizer = CodexSummarizer(model=options.llm_model)
-        console.rule(f"Lecture {index}/{len(options.urls)}")
-        console.print(lecture_url)
-        started = monotonic()
-        progress = ConsoleProgressReporter(("download", "audio", "transcription", "summary"))
-        try:
-            paths = run_lecture(
-                lecture_url,
-                options.output_dir,
-                summarizer,
-                title=options.title,
-                tags=options.tags,
-                model=options.whisper_model,
-                language=options.language,
-                device=options.device,
-                prompt=options.prompt,
-                force=options.force,
-                progress=progress,
-            )
-            console.print(
-                f"[bold green]Complete[/bold green] {paths.root} "
-                f"({format_duration(monotonic() - started)})"
-            )
-        except Exception as error:
-            failures.append((lecture_url, str(error)))
-            console.print(f"[red]Failed[/red] {lecture_url}: {error}")
-    if failures:
-        raise LectureUtilError(f"{len(failures)} of {len(options.urls)} lectures failed.")
+def _execute_run(
+    options: RunOptions,
+    *,
+    vault_root: Path = DEFAULT_VAULT_ROOT,
+    cache_root: Path | None = None,
+) -> None:
+    course = resolve_course(options.course, vault_root)
+    lecture_date = validate_lecture_date(options.lecture_date)
+    title = validate_title(options.title)
+    published = published_lecture_paths(course, lecture_date, title)
+    ensure_paths_available(published)
+
+    summarizer = CodexSummarizer(model=options.llm_model)
+    console.rule(f"{course.name} · {lecture_date} {title}")
+    console.print(options.url)
+    started = monotonic()
+    progress = ConsoleProgressReporter(("download", "audio", "transcription", "summary"))
+    paths = run_lecture(
+        options.url,
+        cache_root or default_cache_root(),
+        summarizer,
+        title=title,
+        course=course.name,
+        lecture_date=lecture_date,
+        published_summary=published.summary,
+        published_transcript=published.transcript,
+        tags=options.tags,
+        model=options.whisper_model,
+        language=options.language,
+        device=options.device,
+        prompt=options.prompt,
+        force=options.force,
+        progress=progress,
+    )
+    publish_lecture_notes(
+        published,
+        course=course,
+        lecture_date=lecture_date,
+        title=title,
+        url=options.url,
+        summary=paths.summary.read_text(encoding="utf-8"),
+        transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
+    )
+    console.print(
+        f"[bold green]Complete[/bold green] {published.summary} "
+        f"({format_duration(monotonic() - started)})"
+    )
 
 
 def _interactive_terminal() -> bool:
@@ -126,11 +152,11 @@ def root_callback(ctx: typer.Context) -> None:
 
 @app.command("run")
 def run_command(
-    url: str | None = typer.Argument(None, help="Public .m3u8 URL"),
-    input_file: Path | None = typer.Option(None, "--input", exists=True, dir_okay=False),
+    url: str = typer.Argument(..., help="Public .m3u8 URL"),
+    course: str = typer.Option(..., "--course", help="Course directory name"),
+    lecture_date: str = typer.Option(..., "--date", help="Lecture date (YYYY-MM-DD)"),
+    title: str = typer.Option(..., "--title", help="Lecture title"),
     llm_model: str | None = typer.Option(None, "--llm-model"),
-    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o"),
-    title: str | None = typer.Option(None, "--title"),
     tag: list[str] | None = typer.Option(None, "--tag"),
     whisper_model: str = typer.Option("large-v3", "--whisper-model"),
     language: str = typer.Option("auto", "--language"),
@@ -139,17 +165,18 @@ def run_command(
     prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    """Download, transcribe, and summarize one lecture or a URL list."""
+    """Download, transcribe, and publish one lecture to the Obsidian vault."""
 
     def action() -> None:
-        urls = read_urls(url, input_file)
+        validated_url = read_urls(url, None)[0]
         selected_prompt = resolve_prompt(prompt, prompt_file)
         _execute_run(
             RunOptions(
-                urls=urls,
-                llm_model=llm_model,
-                output_dir=output_dir,
+                url=validated_url,
+                course=course,
+                lecture_date=lecture_date,
                 title=title,
+                llm_model=llm_model,
                 tags=normalize_tags(tag),
                 whisper_model=whisper_model,
                 language=language,
@@ -165,7 +192,7 @@ def run_command(
 @app.command("download")
 def download_command(
     url: str = typer.Argument(..., help="Public .m3u8 URL"),
-    output_dir: Path = typer.Option(Path("output"), "--output-dir", "-o"),
+    output_dir: Path = typer.Option(default_cache_root(), "--output-dir", "-o"),
     title: str | None = typer.Option(None, "--title"),
     tag: list[str] | None = typer.Option(None, "--tag"),
     force: bool = typer.Option(False, "--force"),
