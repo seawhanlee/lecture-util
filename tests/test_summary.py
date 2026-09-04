@@ -4,11 +4,18 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest.mock import patch
 
 from lecture_util.models import Segment, Transcript
 from lecture_util.progress import ProgressEvent
 from lecture_util.state import create_workspace
-from lecture_util.summary import DEFAULT_PROMPT, summarize_transcript, summary_stage
+from lecture_util.summary import (
+    DEFAULT_PROMPT,
+    DEVELOPER_PROMPT,
+    summarize_transcript,
+    summary_fingerprint,
+    summary_stage,
+)
 
 
 @dataclass
@@ -16,6 +23,7 @@ class FakeSummarizer:
     model: str | None = "fake-model"
     name: str = "fake"
     prompts: list[str] = field(default_factory=list)
+    developer_prompts: list[str] = field(default_factory=list)
     transcript_paths: list[Path] = field(default_factory=list)
 
     def generate(
@@ -24,6 +32,7 @@ class FakeSummarizer:
         user_prompt: str,
         transcript_path: Path,
     ) -> str:
+        self.developer_prompts.append(developer_prompt)
         self.prompts.append(user_prompt)
         self.transcript_paths.append(transcript_path)
         return f"# Note {len(self.prompts)}\n\nA compact result."
@@ -59,6 +68,7 @@ class SummaryTests(unittest.TestCase):
             self.assertTrue(result.startswith("# Note"))
             self.assertEqual(len(fingerprint), 16)
             self.assertEqual(summarizer.prompts, [DEFAULT_PROMPT])
+            self.assertEqual(summarizer.developer_prompts, [DEVELOPER_PROMPT])
             self.assertEqual(summarizer.transcript_paths, [transcript_path])
             self.assertNotIn("segment 0", summarizer.prompts[0])
             self.assertNotIn("```", summarizer.prompts[0])
@@ -101,8 +111,43 @@ class SummaryTests(unittest.TestCase):
             )
             self.assertEqual(third.prompts, [DEFAULT_PROMPT])
 
-    def test_default_user_prompt_is_exact_korean_request(self) -> None:
-        self.assertEqual(DEFAULT_PROMPT, "이 강의를 요약해")
+    def test_default_prompt_requests_structured_review_notes(self) -> None:
+        self.assertIn("핵심 개념", DEFAULT_PROMPT)
+        self.assertIn("복습", DEFAULT_PROMPT)
+        self.assertIn("정의", DEFAULT_PROMPT)
+        self.assertIn("반복되는 설명", DEFAULT_PROMPT)
+
+    def test_developer_prompt_defines_quality_and_output_constraints(self) -> None:
+        for instruction in (
+            "Read the entire attached transcript",
+            "Use only the transcript as evidence",
+            "main language of the lecture",
+            "obvious transcription error",
+            "level-one or level-two headings",
+            "transcript timestamps",
+        ):
+            self.assertIn(instruction, DEVELOPER_PROMPT)
+
+    def test_developer_prompt_participates_in_summary_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcript_path = Path(directory) / "transcript.md"
+            transcript_path.write_text("# Transcript\n", encoding="utf-8")
+            transcript = sample_transcript(2)
+            summarizer = FakeSummarizer()
+            original = summary_fingerprint(
+                transcript,
+                transcript_path,
+                summarizer,
+                DEFAULT_PROMPT,
+            )
+            with patch("lecture_util.summary.DEVELOPER_PROMPT", "Revised instructions"):
+                revised = summary_fingerprint(
+                    transcript,
+                    transcript_path,
+                    summarizer,
+                    DEFAULT_PROMPT,
+                )
+            self.assertNotEqual(original, revised)
 
 
 if __name__ == "__main__":

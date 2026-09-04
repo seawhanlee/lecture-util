@@ -208,7 +208,7 @@ uv run lecture-util run URL \
   --prompt-file prompts/exam-notes.md
 ```
 
-`--prompt`와 `--prompt-file`은 동시에 사용할 수 없습니다. 기본 프롬프트는 `이 강의를 요약해`입니다. Codex는 캐시 작업공간을 읽기 전용으로 열고 `transcript.md`를 직접 읽으며, 결과는 기존 `## Notes` 아래에 삽입할 수 있는 Markdown 본문으로 생성합니다.
+`--prompt`와 `--prompt-file`은 동시에 사용할 수 없습니다. 기본 프롬프트는 강의의 핵심 개념과 관계를 중심으로 복습하기 좋은 정리 노트를 만듭니다. 정의, 원리, 수식의 조건, 대표 예시와 주의사항은 보존하고 반복과 여담은 압축합니다. 강의의 주언어를 유지하며 요약 본문에는 타임스탬프를 넣지 않습니다. Codex는 캐시 작업공간을 읽기 전용으로 열고 `transcript.md`를 직접 읽으며, 결과는 기존 `## Notes` 아래에 삽입할 수 있는 Markdown 본문으로 생성합니다.
 
 ### 태그와 강제 재실행
 
