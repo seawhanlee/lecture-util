@@ -90,6 +90,38 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options.course, COURSE)
         self.assertEqual(options.prompt, "Create exam notes.")
 
+    async def test_space_opens_and_selects_course(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            second_course = "문제해결을 위한 글쓰기"
+            (root / COURSES_DIRECTORY / second_course / "Lecture").mkdir(
+                parents=True
+            )
+            app = LectureSetupApp(root)
+
+            async with app.run_test(size=(100, 40)) as pilot:
+                course = app.query_one("#course", Select)
+                course.focus()
+                await pilot.press("space")
+                self.assertTrue(course.expanded)
+
+                await pilot.press("down", "space")
+                self.assertEqual(course.value, second_course)
+                self.assertFalse(course.expanded)
+
+    async def test_space_remains_available_in_text_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            app = LectureSetupApp(root)
+
+            async with app.run_test(size=(100, 40)) as pilot:
+                title = app.query_one("#lecture-title", Input)
+                title.focus()
+                await pilot.press("a", "space", "b")
+                self.assertEqual(title.value, "a b")
+
     async def test_inline_prompt_mode_is_reflected_in_options(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             vault = Path(directory)

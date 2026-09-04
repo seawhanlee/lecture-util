@@ -13,6 +13,7 @@ from textual.widgets import (
     Collapsible,
     Input,
     Label,
+    OptionList,
     Select,
     TextArea,
 )
@@ -43,6 +44,13 @@ def _week_monday(today: date | None = None) -> str:
 class LectureSetupApp(App[RunOptions]):
     BINDINGS = [
         Binding("enter", "submit", "Run", priority=True),
+        Binding(
+            "space",
+            "select_option",
+            "Select option",
+            show=False,
+            priority=True,
+        ),
         Binding("escape", "cancel", "Cancel"),
     ]
     ENABLE_COMMAND_PALETTE = False
@@ -117,6 +125,7 @@ class LectureSetupApp(App[RunOptions]):
                 tuple((course.name, course.name) for course in self.courses),
                 value=self.courses[0].name,
                 allow_blank=False,
+                type_to_search=False,
                 id="course",
             )
             yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
@@ -186,6 +195,20 @@ class LectureSetupApp(App[RunOptions]):
 
     def action_submit(self) -> None:
         self._submit()
+
+    def action_select_option(self) -> None:
+        focused = self.focused
+        if isinstance(focused, OptionList):
+            focused.action_select()
+
+    def check_action(
+        self,
+        action: str,
+        parameters: tuple[object, ...],
+    ) -> bool | None:
+        if action == "select_option":
+            return isinstance(self.focused, OptionList)
+        return super().check_action(action, parameters)
 
     def _select_value(self, selector: str) -> str:
         return cast(str, self.query_one(selector, Select).value)
