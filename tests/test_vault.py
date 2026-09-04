@@ -91,14 +91,21 @@ def test_publishes_linked_obsidian_notes_and_refuses_conflicts(tmp_path: Path) -
 
     summary = paths.summary.read_text(encoding="utf-8")
     transcript = paths.transcript.read_text(encoding="utf-8")
+    summary_properties = summary.split("---", 2)[1]
+    transcript_properties = transcript.split("---", 2)[1]
     assert paths.summary.parent.is_dir()
     assert "type: lecture\n" in summary
     assert 'course: "공기역학특론"' in summary
+    assert "source_url:" not in summary_properties
+    assert "transcript:" not in summary_properties
     assert "[[공기역학특론 MOC|공기역학특론]]" in summary
     assert "[[2026-09-04 압축성 유동 전사]]" in summary
     assert "### 핵심" in summary
     assert "type: lecture-transcript\n" in transcript
+    assert "source_url:" not in transcript_properties
+    assert "transcript:" not in transcript_properties
     assert "[[2026-09-04 압축성 유동]]" in transcript
+    assert "Source: https://example.com/index.m3u8" in transcript
     assert transcript.count("# Transcript") == 1
 
     with pytest.raises(LectureUtilError, match="already exists"):

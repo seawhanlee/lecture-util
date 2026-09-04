@@ -270,8 +270,6 @@ area:
   - academics
 course: "공기역학특론"
 created: 2026-09-04
-source_url: "https://example.com/lecture/index.m3u8"
-transcript: "[[2026-09-04 압축성 유동 전사]]"
 ---
 
 # 2026-09-04 압축성 유동
@@ -291,7 +289,7 @@ Codex가 생성한 요약...
 
 ### Vault의 전사 노트
 
-같은 주차 폴더에 `YYYY-MM-DD 제목 전사.md`를 만듭니다. `lecture-transcript` frontmatter, 원본 URL, 요약 노트 링크와 구간별 타임스탬프가 포함됩니다.
+같은 주차 폴더에 `YYYY-MM-DD 제목 전사.md`를 만듭니다. `lecture-transcript` frontmatter와 본문의 원본 URL, 요약 노트 링크 및 구간별 타임스탬프가 포함됩니다. 생성되는 두 노트의 Properties에는 `source_url`과 `transcript`를 추가하지 않습니다.
 
 ```markdown
 # 2026-09-04 압축성 유동 전사

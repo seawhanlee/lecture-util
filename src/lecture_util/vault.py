@@ -185,7 +185,6 @@ def _summary_note(
     course: Course,
     lecture_date: str,
     title: str,
-    url: str,
     transcript_stem: str,
     summary: str,
 ) -> str:
@@ -197,8 +196,6 @@ area:
   - academics
 course: {_yaml_string(course.name)}
 created: {lecture_date}
-source_url: {_yaml_string(url)}
-transcript: {_yaml_string(f"[[{transcript_stem}]]")}
 ---
 
 # {lecture_date} {title}
@@ -250,7 +247,6 @@ area:
   - academics
 course: {_yaml_string(course.name)}
 created: {lecture_date}
-source_url: {_yaml_string(url)}
 lecture: {_yaml_string(f"[[{summary_stem}]]")}
 ---
 
@@ -283,7 +279,6 @@ def publish_lecture_notes(
         course=course,
         lecture_date=lecture_date,
         title=title,
-        url=url,
         transcript_stem=paths.transcript.stem,
         summary=summary,
     )
