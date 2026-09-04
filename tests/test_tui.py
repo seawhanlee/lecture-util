@@ -87,6 +87,23 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(options.prompt, "한국어로 요약해")
 
+    async def test_enter_submits_even_when_select_is_focused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#lecture-title", Input).value = "강의개요"
+                app.query_one("#source", Input).value = URL
+                app.query_one("#course", Select).focus()
+                await pilot.press("enter")
+
+        options = app.return_value
+        self.assertIsNotNone(options)
+        assert options is not None
+        self.assertEqual(options.course, COURSE)
+
     async def test_submit_shows_validation_error_without_exiting(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             vault = Path(directory)
@@ -94,7 +111,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
                 app.query_one("#source", Input).value = URL
-                await pilot.click("#run")
+                await pilot.press("enter")
                 await pilot.pause()
                 error = app.query_one("#error", Label)
                 self.assertTrue(error.display)

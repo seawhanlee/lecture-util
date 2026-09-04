@@ -35,7 +35,10 @@ from lecture_util.vault import (
 
 
 class LectureSetupApp(App[RunOptions]):
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("enter", "submit", "Run", priority=True),
+        Binding("escape", "cancel", "Cancel"),
+    ]
     ENABLE_COMMAND_PALETTE = False
 
     CSS = """
@@ -174,6 +177,9 @@ class LectureSetupApp(App[RunOptions]):
 
     def action_cancel(self) -> None:
         self.exit()
+
+    def action_submit(self) -> None:
+        self._submit()
 
     def _select_value(self, selector: str) -> str:
         return cast(str, self.query_one(selector, Select).value)
