@@ -9,7 +9,7 @@ from lecture_util.errors import LectureUtilError
 from lecture_util.state import atomic_write_text
 
 
-DEFAULT_VAULT_ROOT = Path("/home/seawhan/Documents/학부연구생")
+DEFAULT_VAULT_ROOT = Path.home() / "Documents" / "학부연구생"
 COURSES_DIRECTORY = Path("10 Academics/Courses")
 LECTURE_DIRECTORY_NAMES = ("Lecture", "Lectures")
 DEFAULT_SEMESTER_START_MONTH = 8
