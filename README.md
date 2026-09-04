@@ -16,7 +16,7 @@
 
 1. Vault에 과목 폴더와 `Lecture` 또는 `Lectures` 폴더를 미리 만듭니다.
 2. 의존성을 설치하고 환경을 점검합니다.
-3. 인자 없이 실행하여 TUI에서 과목, 날짜, 제목과 URL을 입력합니다.
+3. 인자 없이 실행하여 최초 온보딩을 완료한 뒤 과목, 날짜, 제목과 URL을 입력합니다.
 
 ```bash
 uv sync --dev
@@ -69,18 +69,31 @@ uv run lecture-util doctor
 
 자동 장치 선택은 Apple Silicon의 MLX 또는 Linux x86_64의 NVIDIA GPU를 기대합니다. GPU를 사용할 수 없는 환경에서 CPU 전사를 의도한다면 `--device cpu`를 명시하거나 TUI의 장치를 `CPU`로 선택하세요.
 
-## Vault 준비
+## 온보딩과 Vault 준비
 
-Vault 경로는 다음 값으로 고정되어 있습니다.
+처음 인자 없이 실행하면 강의 입력 화면보다 먼저 온보딩 화면이 열립니다. 다음 기본값을 설정합니다.
 
-```text
-/home/seawhan/Documents/학부연구생
+| 항목 | 최초 제안값 | 설명 |
+| --- | --- | --- |
+| Obsidian Vault path | `~/Documents/학부연구생` | 강의 노트를 발행할 Vault 루트 |
+| Semester start date | 가장 최근의 8월 31일 | 강의 주차 계산 기준일 |
+| Transcription device | `auto` | `auto`, `mlx`, `cuda`, `cpu` 중 선택 |
+| Whisper model | `large-v3` | 기본 Whisper 모델 이름 또는 경로 |
+| Lecture language | `auto` | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
+| Codex model | 비어 있음 | 비어 있으면 Codex CLI에 설정된 기본 모델 사용 |
+
+설정은 `$XDG_CONFIG_HOME/lecture-util/config.json`에 저장됩니다. `XDG_CONFIG_HOME`이 없으면 `~/.config/lecture-util/config.json`을 사용합니다. 설정을 바꾸려면 대화형 터미널에서 다음 명령을 실행합니다.
+
+```bash
+uv run lecture-util onboard
 ```
+
+온보딩은 Vault가 현재 강의 발행에 사용 가능한지 확인합니다. 따라서 아래 과목 구조를 먼저 만든 뒤 저장해야 합니다.
 
 과목은 Vault의 `10 Academics/Courses` 바로 아래에 있어야 합니다. 각 과목에는 정확히 하나의 `Lecture` 또는 `Lectures` 폴더가 필요합니다.
 
 ```text
-/home/seawhan/Documents/학부연구생/
+<Obsidian Vault>/
 └── 10 Academics/
     └── Courses/
         ├── 공기역학특론/
@@ -128,13 +141,13 @@ uv run lecture-util
 
 | 항목 | 기본값 | 설명 |
 | --- | --- | --- |
-| Semester start date | 가장 최근의 8월 31일 | 주차 계산의 기준일이며 `YYYY-MM-DD` 형식으로 변경 가능 |
+| Semester start date | 온보딩 설정값 | 주차 계산의 기준일이며 `YYYY-MM-DD` 형식으로 변경 가능 |
 | Tags | 없음 | 쉼표로 구분하며 캐시의 `run.json`에만 기록 |
 | Force every stage | 꺼짐 | 다운로드부터 요약까지 캐시 단계를 모두 다시 실행 |
-| Transcription device | `auto` | `mlx`, `cuda`, `cpu` 중 직접 선택 가능 |
-| Whisper model | `large-v3` | Whisper 모델 이름 또는 지원되는 모델 경로 |
-| Lecture language | `auto` | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
-| Codex model | Codex 기본값 | 요약에 사용할 Codex 모델 |
+| Transcription device | 온보딩 설정값 | `auto`, `mlx`, `cuda`, `cpu` 중 직접 선택 가능 |
+| Whisper model | 온보딩 설정값 | Whisper 모델 이름 또는 지원되는 모델 경로 |
+| Lecture language | 온보딩 설정값 | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
+| Codex model | 온보딩 설정값 | 비어 있으면 Codex CLI 기본 모델 사용 |
 | Summary prompt | 기본 프롬프트 | 직접 입력하거나 Markdown/text 파일에서 읽기 |
 
 `Enter`를 누르거나 `Run`을 선택하면 다운로드 전에 과목 구조, 날짜, 제목과 대상 파일 충돌을 검사합니다. `Enter`는 포커스된 항목과 관계없이 즉시 실행합니다. 기존 노트가 있으면 TUI를 닫지 않고 오류를 표시하므로 날짜나 제목을 수정해 다시 실행할 수 있습니다. `Esc` 또는 `Cancel`은 아무 작업도 시작하지 않고 종료합니다.
@@ -154,14 +167,14 @@ https://example.com/lecture/index.m3u8
 ✓ [3/4] Created 282 segments in 2m 12s (faster-whisper/large-v3, ko)
 → [4/4] Summarizing transcript file with Codex
 ✓ [4/4] Wrote summary in 1m 58s to /home/seawhan/.cache/lecture-util/lecture-0123456789/summary.md
-Complete /home/seawhan/Documents/학부연구생/10 Academics/Courses/공기역학특론/Lectures/1주차/2026-09-04 압축성 유동.md (4m 35s)
+Complete <Obsidian Vault>/10 Academics/Courses/공기역학특론/Lectures/1주차/2026-09-04 압축성 유동.md (4m 35s)
 ```
 
 파이프나 CI처럼 stdin/stdout이 터미널이 아닌 환경에서 인자 없이 호출하면 TUI를 기다리지 않고 종료 코드 2로 끝납니다.
 
 ## `run` 명령 사용법
 
-TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. URL, 과목, 날짜와 제목은 모두 필수입니다.
+TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 URL, 과목, 날짜와 제목은 모두 필수입니다.
 
 ```bash
 uv run lecture-util run \
@@ -173,7 +186,7 @@ uv run lecture-util run \
 
 과목 이름은 `Courses` 아래의 실제 디렉터리 이름과 정확히 일치해야 합니다. 한 번에 강의 하나만 처리하며 URL 목록을 받는 `--input` 배치 모드는 지원하지 않습니다.
 
-기본 학기 시작일은 강의일 기준 가장 최근의 8월 31일입니다. 시작일부터 7일씩 `1주차`, `2주차` 등으로 계산하며, 다른 기준일이 필요하면 지정할 수 있습니다.
+기본 학기 시작일은 온보딩에서 저장한 값입니다. 시작일부터 7일씩 `1주차`, `2주차` 등으로 계산하며, 다른 기준일이 필요한 한 번의 실행에서는 `--semester-start`로 덮어쓸 수 있습니다.
 
 ```bash
 uv run lecture-util run URL \
@@ -184,6 +197,8 @@ uv run lecture-util run URL \
 ```
 
 ### 전사 옵션 지정
+
+Whisper 모델, 언어, 장치와 Codex 모델도 온보딩 설정을 기본값으로 사용합니다. 명령행 옵션을 지정하면 해당 실행에서만 저장값을 덮어쓰며 설정 파일은 변경하지 않습니다.
 
 ```bash
 uv run lecture-util run URL \
