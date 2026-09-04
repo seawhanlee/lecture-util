@@ -19,6 +19,8 @@ from textual.widgets import (
 )
 
 from lecture_util.configuration import (
+    AppConfig,
+    default_app_config,
     normalize_tags,
     read_urls,
     resolve_prompt,
@@ -27,7 +29,6 @@ from lecture_util.errors import LectureUtilError
 from lecture_util.models import RunOptions
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
-    default_semester_start,
     discover_courses,
     ensure_paths_available,
     published_lecture_paths,
@@ -114,10 +115,24 @@ class LectureSetupApp(App[RunOptions]):
     }
     """
 
-    def __init__(self, vault_root: Path = DEFAULT_VAULT_ROOT) -> None:
+    def __init__(
+        self,
+        vault_root: Path = DEFAULT_VAULT_ROOT,
+        *,
+        config: AppConfig | None = None,
+    ) -> None:
         super().__init__()
-        self.vault_root = vault_root
-        self.courses = discover_courses(vault_root)
+        defaults = default_app_config()
+        self.config = config or AppConfig(
+            vault_root=vault_root,
+            semester_start=defaults.semester_start,
+            whisper_model=defaults.whisper_model,
+            language=defaults.language,
+            device=defaults.device,
+            llm_model=defaults.llm_model,
+        )
+        self.vault_root = self.config.vault_root
+        self.courses = discover_courses(self.vault_root)
 
     def compose(self) -> ComposeResult:
         lecture_date = _week_monday()
@@ -141,7 +156,7 @@ class LectureSetupApp(App[RunOptions]):
             with Collapsible(title="Advanced settings", collapsed=True):
                 yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
                 yield Input(
-                    value=default_semester_start(date.fromisoformat(lecture_date)),
+                    value=self.config.semester_start,
                     id="semester-start",
                 )
                 yield Label("Tags (comma-separated, optional)", classes="field-label")
@@ -155,16 +170,16 @@ class LectureSetupApp(App[RunOptions]):
                         ("NVIDIA CUDA", "cuda"),
                         ("CPU", "cpu"),
                     ),
-                    value="auto",
+                    value=self.config.device,
                     allow_blank=False,
                     id="device",
                 )
                 yield Label("Whisper model", classes="field-label")
-                yield Input(value="large-v3", id="whisper-model")
+                yield Input(value=self.config.whisper_model, id="whisper-model")
                 yield Label("Lecture language", classes="field-label")
-                yield Input(value="auto", id="language")
+                yield Input(value=self.config.language, id="language")
                 yield Label("Codex model (blank uses configured default)", classes="field-label")
-                yield Input(id="llm-model")
+                yield Input(value=self.config.llm_model or "", id="llm-model")
                 yield Label("Summary prompt", classes="field-label")
                 yield Select(
                     (
@@ -297,5 +312,7 @@ class LectureSetupApp(App[RunOptions]):
         )
 
 
-def run_tui() -> RunOptions | None:
-    return LectureSetupApp().run()
+def run_tui(config: AppConfig | None = None) -> RunOptions | None:
+    if config is None:
+        return LectureSetupApp().run()
+    return LectureSetupApp(config=config).run()

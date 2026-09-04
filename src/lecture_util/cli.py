@@ -11,11 +11,20 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from lecture_util.configuration import normalize_tags, read_urls, resolve_prompt
+from lecture_util.configuration import (
+    default_app_config,
+    default_config_path,
+    load_config,
+    normalize_tags,
+    read_urls,
+    resolve_prompt,
+    save_config,
+)
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
 from lecture_util.media import validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
+from lecture_util.onboarding import run_onboarding
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
 from lecture_util.progress import ProgressEvent, format_duration
 from lecture_util.state import RunState, create_workspace
@@ -152,11 +161,19 @@ def root_callback(ctx: typer.Context) -> None:
         console.print("Run 'lecture-util --help' for usage.")
         raise typer.Exit(2)
     try:
-        options = run_tui()
+        config = load_config()
+        if config is None:
+            config = run_onboarding(default_app_config())
+            if config is None:
+                console.print("Cancelled before setup.")
+                return
+            config = save_config(config)
+            console.print(f"[green]Configuration saved[/green] {default_config_path()}")
+        options = run_tui(config)
         if options is None:
             console.print("Cancelled before processing.")
             return
-        _execute_run(options)
+        _execute_run(options, vault_root=config.vault_root)
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
@@ -170,14 +187,30 @@ def run_command(
     semester_start: str | None = typer.Option(
         None,
         "--semester-start",
-        help="Semester start date (YYYY-MM-DD; default: most recent August 31)",
+        help="Override the configured semester start date (YYYY-MM-DD)",
     ),
     title: str = typer.Option(..., "--title", help="Lecture title"),
-    llm_model: str | None = typer.Option(None, "--llm-model"),
+    llm_model: str | None = typer.Option(
+        None,
+        "--llm-model",
+        help="Override the configured Codex model; pass an empty value for its default",
+    ),
     tag: list[str] | None = typer.Option(None, "--tag"),
-    whisper_model: str = typer.Option("large-v3", "--whisper-model"),
-    language: str = typer.Option("auto", "--language"),
-    device: str = typer.Option("auto", "--device"),
+    whisper_model: str | None = typer.Option(
+        None,
+        "--whisper-model",
+        help="Override the configured Whisper model",
+    ),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="Override the configured lecture language",
+    ),
+    device: str | None = typer.Option(
+        None,
+        "--device",
+        help="Override the configured transcription device",
+    ),
     prompt: str | None = typer.Option(None, "--prompt"),
     prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
     force: bool = typer.Option(False, "--force"),
@@ -185,24 +218,57 @@ def run_command(
     """Download, transcribe, and publish one lecture to the Obsidian vault."""
 
     def action() -> None:
+        config = load_config(required=True)
+        assert config is not None
         validated_url = read_urls(url, None)[0]
         selected_prompt = resolve_prompt(prompt, prompt_file)
+        selected_llm_model = (
+            config.llm_model
+            if llm_model is None
+            else llm_model.strip() or None
+        )
         _execute_run(
             RunOptions(
                 url=validated_url,
                 course=course,
                 lecture_date=lecture_date,
-                semester_start=semester_start,
+                semester_start=semester_start or config.semester_start,
                 title=title,
-                llm_model=llm_model,
+                llm_model=selected_llm_model,
                 tags=normalize_tags(tag),
-                whisper_model=whisper_model,
-                language=language,
-                device=device,
+                whisper_model=whisper_model or config.whisper_model,
+                language=language or config.language,
+                device=device or config.device,
                 prompt=selected_prompt,
                 force=force,
-            )
+            ),
+            vault_root=config.vault_root,
         )
+
+    _run_or_exit(action)
+
+
+@app.command("onboard")
+def onboard_command() -> None:
+    """Configure the Obsidian Vault and lecture processing defaults."""
+    if not _interactive_terminal():
+        console.print(
+            "[red]Error:[/red] onboarding requires an interactive terminal."
+        )
+        raise typer.Exit(2)
+
+    def action() -> None:
+        try:
+            initial = load_config(validate_vault=False)
+        except LectureUtilError as error:
+            console.print(f"[yellow]Warning:[/yellow] {error}")
+            initial = None
+        selected = run_onboarding(initial or default_app_config())
+        if selected is None:
+            console.print("Onboarding cancelled; configuration was not changed.")
+            return
+        save_config(selected)
+        console.print(f"[green]Configuration saved[/green] {default_config_path()}")
 
     _run_or_exit(action)
 

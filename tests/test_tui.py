@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from textual.widgets import Input, Label, Select, TextArea
 
+from lecture_util.configuration import AppConfig
 from lecture_util.summary import DEFAULT_PROMPT
 from lecture_util.tui import LectureSetupApp, _week_monday
 from lecture_util.vault import COURSES_DIRECTORY
@@ -21,6 +22,19 @@ def create_vault(root: Path) -> None:
     (root / COURSES_DIRECTORY / COURSE / "Lectures").mkdir(parents=True)
 
 
+def configured_app(vault: Path) -> LectureSetupApp:
+    return LectureSetupApp(
+        config=AppConfig(
+            vault_root=vault,
+            semester_start="2026-09-01",
+            whisper_model="turbo",
+            language="ko",
+            device="cpu",
+            llm_model="gpt-test",
+        )
+    )
+
+
 class TuiTests(unittest.IsolatedAsyncioTestCase):
     def test_week_monday_handles_week_and_year_boundaries(self) -> None:
         self.assertEqual(_week_monday(date(2026, 9, 7)), "2026-09-07")
@@ -31,13 +45,15 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             vault = Path(directory)
             create_vault(vault)
-            app = LectureSetupApp(vault)
-            with (
-                patch("lecture_util.tui._week_monday", return_value="2026-08-31"),
-                patch(
-                    "lecture_util.tui.default_semester_start",
-                    return_value="2026-08-31",
-                ),
+            app = LectureSetupApp(
+                config=AppConfig(
+                    vault_root=vault,
+                    semester_start="2026-08-31",
+                )
+            )
+            with patch(
+                "lecture_util.tui._week_monday",
+                return_value="2026-08-31",
             ):
                 async with app.run_test(size=(100, 40)):
                     value = app.query_one("#lecture-date", Input).value
@@ -45,6 +61,25 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(value, "2026-08-31")
         self.assertEqual(semester_start, "2026-08-31")
+
+    async def test_configured_processing_defaults_are_loaded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = configured_app(vault)
+
+            async with app.run_test(size=(100, 40)):
+                semester_start = app.query_one("#semester-start", Input).value
+                device = app.query_one("#device", Select).value
+                whisper_model = app.query_one("#whisper-model", Input).value
+                language = app.query_one("#language", Input).value
+                llm_model = app.query_one("#llm-model", Input).value
+
+        self.assertEqual(semester_start, "2026-09-01")
+        self.assertEqual(device, "cpu")
+        self.assertEqual(whisper_model, "turbo")
+        self.assertEqual(language, "ko")
+        self.assertEqual(llm_model, "gpt-test")
 
     async def test_default_form_builds_vault_run_options(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -8,6 +8,8 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from lecture_util.cli import _execute_run, app, normalize_tags
+from lecture_util.configuration import AppConfig
+from lecture_util.errors import LectureUtilError
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.summary import DEFAULT_PROMPT
 from lecture_util.vault import COURSES_DIRECTORY
@@ -34,6 +36,17 @@ def options() -> RunOptions:
     )
 
 
+def configured_defaults(vault: Path = Path("/configured-vault")) -> AppConfig:
+    return AppConfig(
+        vault_root=vault,
+        semester_start="2026-08-31",
+        whisper_model="turbo",
+        language="ko",
+        device="cuda",
+        llm_model="gpt-test",
+    )
+
+
 class CliTests(unittest.TestCase):
     def setUp(self) -> None:
         self.runner = CliRunner()
@@ -49,7 +62,11 @@ class CliTests(unittest.TestCase):
         self.assertIn("not interactive", result.output)
 
     def test_run_metadata_and_tags_are_passed_to_shared_options(self) -> None:
-        with patch("lecture_util.cli._execute_run") as execute:
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli._execute_run") as execute,
+        ):
             result = self.runner.invoke(
                 app,
                 [
@@ -73,10 +90,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(selected.url, URL)
         self.assertEqual(selected.course, COURSE)
         self.assertEqual(selected.lecture_date, "2026-09-04")
-        self.assertIsNone(selected.semester_start)
+        self.assertEqual(selected.semester_start, "2026-08-31")
+        self.assertEqual(selected.whisper_model, "turbo")
+        self.assertEqual(selected.language, "ko")
+        self.assertEqual(selected.device, "cuda")
+        self.assertEqual(selected.llm_model, "gpt-test")
+        self.assertEqual(execute.call_args.kwargs["vault_root"], config.vault_root)
 
     def test_run_accepts_custom_semester_start(self) -> None:
-        with patch("lecture_util.cli._execute_run") as execute:
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli._execute_run") as execute,
+        ):
             result = self.runner.invoke(
                 app,
                 [
@@ -95,6 +121,69 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(execute.call_args.args[0].semester_start, "2026-09-07")
+
+    def test_run_cli_processing_options_override_configured_defaults(self) -> None:
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli._execute_run") as execute,
+        ):
+            result = self.runner.invoke(
+                app,
+                [
+                    "run",
+                    URL,
+                    "--course",
+                    COURSE,
+                    "--date",
+                    "2026-09-04",
+                    "--title",
+                    "압축성 유동",
+                    "--whisper-model",
+                    "large-v3",
+                    "--language",
+                    "en",
+                    "--device",
+                    "cpu",
+                    "--llm-model",
+                    "",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        selected = execute.call_args.args[0]
+        self.assertEqual(selected.whisper_model, "large-v3")
+        self.assertEqual(selected.language, "en")
+        self.assertEqual(selected.device, "cpu")
+        self.assertIsNone(selected.llm_model)
+
+    def test_run_without_config_explains_how_to_onboard(self) -> None:
+        with (
+            patch(
+                "lecture_util.cli.load_config",
+                side_effect=LectureUtilError(
+                    "lecture-util is not configured. Run 'lecture-util onboard' first."
+                ),
+            ),
+            patch("lecture_util.cli._execute_run") as execute,
+        ):
+            result = self.runner.invoke(
+                app,
+                [
+                    "run",
+                    URL,
+                    "--course",
+                    COURSE,
+                    "--date",
+                    "2026-09-04",
+                    "--title",
+                    "압축성 유동",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("lecture-util onboard", result.output)
+        execute.assert_not_called()
 
     def test_help_exposes_single_lecture_vault_options(self) -> None:
         result = self.runner.invoke(app, ["run", "--help"])
@@ -162,18 +251,56 @@ class CliTests(unittest.TestCase):
 
     def test_bare_command_passes_tui_options_to_pipeline(self) -> None:
         selected = options()
+        config = configured_defaults()
         with (
             patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=config),
             patch("lecture_util.cli.run_tui", return_value=selected),
             patch("lecture_util.cli._execute_run") as execute,
         ):
             result = self.runner.invoke(app, [])
         self.assertEqual(result.exit_code, 0, result.output)
-        execute.assert_called_once_with(selected)
+        execute.assert_called_once_with(selected, vault_root=config.vault_root)
 
-    def test_tui_cancel_does_not_start_pipeline(self) -> None:
+    def test_bare_first_run_onboards_then_opens_lecture_tui(self) -> None:
+        selected = options()
+        config = configured_defaults()
         with (
             patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=None),
+            patch("lecture_util.cli.run_onboarding", return_value=config) as onboarding,
+            patch("lecture_util.cli.save_config", return_value=config) as save,
+            patch("lecture_util.cli.run_tui", return_value=selected) as tui,
+            patch("lecture_util.cli._execute_run") as execute,
+        ):
+            result = self.runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        onboarding.assert_called_once()
+        save.assert_called_once_with(config)
+        tui.assert_called_once_with(config)
+        execute.assert_called_once_with(selected, vault_root=config.vault_root)
+
+    def test_bare_first_run_can_cancel_onboarding(self) -> None:
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=None),
+            patch("lecture_util.cli.run_onboarding", return_value=None),
+            patch("lecture_util.cli.save_config") as save,
+            patch("lecture_util.cli.run_tui") as tui,
+        ):
+            result = self.runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Cancelled before setup", result.output)
+        save.assert_not_called()
+        tui.assert_not_called()
+
+    def test_tui_cancel_does_not_start_pipeline(self) -> None:
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=config),
             patch("lecture_util.cli.run_tui", return_value=None),
             patch("lecture_util.cli._execute_run") as execute,
         ):
@@ -181,6 +308,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         execute.assert_not_called()
         self.assertIn("Cancelled before processing", result.output)
+
+    def test_onboard_replaces_existing_configuration(self) -> None:
+        existing = configured_defaults(Path("/old-vault"))
+        updated = configured_defaults(Path("/new-vault"))
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=existing),
+            patch("lecture_util.cli.run_onboarding", return_value=updated) as onboarding,
+            patch("lecture_util.cli.save_config", return_value=updated) as save,
+        ):
+            result = self.runner.invoke(app, ["onboard"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        onboarding.assert_called_once_with(existing)
+        save.assert_called_once_with(updated)
+
+    def test_onboard_requires_an_interactive_terminal(self) -> None:
+        with patch("lecture_util.cli._interactive_terminal", return_value=False):
+            result = self.runner.invoke(app, ["onboard"])
+
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("interactive terminal", result.output)
 
 
 if __name__ == "__main__":
