@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from time import monotonic
 
+from lecture_util.errors import LectureUtilError
 from lecture_util.media import download_hls, extract_audio, tool_version
 from lecture_util.models import LecturePaths, Transcript
 from lecture_util.progress import ProgressCallback, format_duration, format_size, report
@@ -27,6 +28,11 @@ def download_stage(
             f"Reusing video ({format_size(paths.video.stat().st_size)})",
         )
         return
+    if not force and paths.video.exists():
+        raise LectureUtilError(
+            "Video file already exists but is not a completed download for this URL. "
+            f"Use --force to replace it: {paths.video}"
+        )
     started = monotonic()
     report(progress, "download", "start", "Downloading HLS video")
     state.start_stage("download")
@@ -187,6 +193,7 @@ def prepare_lecture(
     url: str,
     output_dir: Path,
     *,
+    video_path: Path | None = None,
     title: str | None = None,
     course: str | None = None,
     lecture_date: str | None = None,
@@ -202,6 +209,7 @@ def prepare_lecture(
     paths, state = create_workspace(
         url,
         output_dir,
+        video_path=video_path,
         title=title,
         course=course,
         lecture_date=lecture_date,
@@ -228,6 +236,7 @@ def run_lecture(
     output_dir: Path,
     summarizer: Summarizer,
     *,
+    video_path: Path | None = None,
     title: str | None = None,
     course: str | None = None,
     lecture_date: str | None = None,
@@ -244,6 +253,7 @@ def run_lecture(
     paths, state, transcript = prepare_lecture(
         url,
         output_dir,
+        video_path=video_path,
         title=title,
         course=course,
         lecture_date=lecture_date,

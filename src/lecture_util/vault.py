@@ -152,6 +152,20 @@ def published_lecture_paths(
     )
 
 
+def lecture_video_path(
+    video_root: Path,
+    course: Course,
+    lecture_date: str,
+    title: str,
+    *,
+    semester_start: str,
+) -> Path:
+    normalized_date = validate_lecture_date(lecture_date)
+    normalized_title = validate_title(title)
+    week = lecture_week(normalized_date, semester_start)
+    return video_root / course.name / f"{week}주차" / f"{normalized_title}.mp4"
+
+
 def ensure_paths_available(paths: PublishedLecturePaths) -> None:
     conflicts = [path for path in (paths.summary, paths.transcript) if path.exists()]
     if conflicts:

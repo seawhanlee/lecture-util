@@ -26,6 +26,7 @@ def configured_app(vault: Path) -> LectureSetupApp:
     return LectureSetupApp(
         config=AppConfig(
             vault_root=vault,
+            video_root=vault.parent / "videos",
             semester_start="2026-09-01",
             whisper_model="turbo",
             language="ko",
@@ -48,6 +49,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             app = LectureSetupApp(
                 config=AppConfig(
                     vault_root=vault,
+                    video_root=vault.parent / "videos",
                     semester_start="2026-08-31",
                 )
             )

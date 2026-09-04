@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,9 +37,13 @@ def options() -> RunOptions:
     )
 
 
-def configured_defaults(vault: Path = Path("/configured-vault")) -> AppConfig:
+def configured_defaults(
+    vault: Path = Path("/configured-vault"),
+    video_root: Path = Path("/configured-videos"),
+) -> AppConfig:
     return AppConfig(
         vault_root=vault,
+        video_root=video_root,
         semester_start="2026-08-31",
         whisper_model="turbo",
         language="ko",
@@ -96,6 +101,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(selected.device, "cuda")
         self.assertEqual(selected.llm_model, "gpt-test")
         self.assertEqual(execute.call_args.kwargs["vault_root"], config.vault_root)
+        self.assertEqual(execute.call_args.kwargs["video_root"], config.video_root)
 
     def test_run_accepts_custom_semester_start(self) -> None:
         config = configured_defaults()
@@ -196,6 +202,92 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("--output-dir", result.output)
         self.assertIn("--llm-model", result.output)
 
+    def test_download_uses_configured_video_root_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            (vault / COURSES_DIRECTORY / COURSE / "Lectures").mkdir(parents=True)
+            config = configured_defaults(vault, root / "videos")
+            cache = root / "cache"
+
+            with (
+                patch("lecture_util.cli.load_config", return_value=config),
+                patch("lecture_util.cli.download_stage") as download,
+                patch("lecture_util.cli.audio_stage") as audio,
+            ):
+                result = self.runner.invoke(
+                    app,
+                    [
+                        "download",
+                        URL,
+                        "--course",
+                        COURSE,
+                        "--date",
+                        "2026-09-08",
+                        "--title",
+                        "압축성 유동",
+                        "--output-dir",
+                        str(cache),
+                    ],
+                )
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            paths = download.call_args.args[0]
+            self.assertEqual(paths.root.parent, cache)
+            self.assertEqual(
+                paths.video,
+                root / "videos" / COURSE / "2주차" / "압축성 유동.mp4",
+            )
+            self.assertEqual(audio.call_args.args[0], paths)
+            self.assertEqual(download.call_args.args[1].data["course"], COURSE)
+            self.assertEqual(
+                download.call_args.args[1].data["lecture_date"],
+                "2026-09-08",
+            )
+
+    def test_download_defaults_date_to_request_day(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            (vault / COURSES_DIRECTORY / COURSE / "Lectures").mkdir(parents=True)
+            config = configured_defaults(vault, root / "videos")
+
+            with (
+                patch("lecture_util.cli.load_config", return_value=config),
+                patch("lecture_util.cli.date") as date_type,
+                patch("lecture_util.cli.download_stage") as download,
+                patch("lecture_util.cli.audio_stage"),
+            ):
+                date_type.today.return_value = date(2026, 9, 15)
+                result = self.runner.invoke(
+                    app,
+                    [
+                        "download",
+                        URL,
+                        "--course",
+                        COURSE,
+                        "--title",
+                        "압축성 유동",
+                        "--output-dir",
+                        str(root / "cache"),
+                    ],
+                )
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertEqual(
+                download.call_args.args[0].video,
+                root / "videos" / COURSE / "3주차" / "압축성 유동.mp4",
+            )
+
+    def test_download_help_requires_course_and_title_but_not_date(self) -> None:
+        result = self.runner.invoke(app, ["download", "--help"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("--course", result.output)
+        self.assertIn("--title", result.output)
+        self.assertIn("--date", result.output)
+        self.assertIn("default: today", result.output)
+
     def test_execute_run_uses_cache_and_publishes_notes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -215,11 +307,20 @@ class CliTests(unittest.TestCase):
                 patch("lecture_util.cli.CodexSummarizer") as factory,
                 patch("lecture_util.cli.run_lecture", return_value=cached) as run_lecture,
             ):
-                _execute_run(options(), vault_root=vault, cache_root=cache)
+                _execute_run(
+                    options(),
+                    vault_root=vault,
+                    video_root=root / "videos",
+                    cache_root=cache,
+                )
 
             factory.assert_called_once_with(model=None)
             self.assertEqual(run_lecture.call_args.args[0], URL)
             self.assertEqual(run_lecture.call_args.args[1], cache)
+            self.assertEqual(
+                run_lecture.call_args.kwargs["video_path"],
+                root / "videos" / COURSE / "1주차" / "압축성 유동.mp4",
+            )
             self.assertEqual(run_lecture.call_args.kwargs["course"], COURSE)
             self.assertEqual(
                 run_lecture.call_args.kwargs["lecture_date"], "2026-09-04"
@@ -245,7 +346,12 @@ class CliTests(unittest.TestCase):
                 patch("lecture_util.cli.run_lecture") as run_lecture,
                 self.assertRaisesRegex(Exception, "already exists"),
             ):
-                _execute_run(options(), vault_root=vault, cache_root=root / "cache")
+                _execute_run(
+                    options(),
+                    vault_root=vault,
+                    video_root=root / "videos",
+                    cache_root=root / "cache",
+                )
             factory.assert_not_called()
             run_lecture.assert_not_called()
 
@@ -260,7 +366,11 @@ class CliTests(unittest.TestCase):
         ):
             result = self.runner.invoke(app, [])
         self.assertEqual(result.exit_code, 0, result.output)
-        execute.assert_called_once_with(selected, vault_root=config.vault_root)
+        execute.assert_called_once_with(
+            selected,
+            vault_root=config.vault_root,
+            video_root=config.video_root,
+        )
 
     def test_bare_first_run_onboards_then_opens_lecture_tui(self) -> None:
         selected = options()
@@ -279,7 +389,11 @@ class CliTests(unittest.TestCase):
         onboarding.assert_called_once()
         save.assert_called_once_with(config)
         tui.assert_called_once_with(config)
-        execute.assert_called_once_with(selected, vault_root=config.vault_root)
+        execute.assert_called_once_with(
+            selected,
+            vault_root=config.vault_root,
+            video_root=config.video_root,
+        )
 
     def test_bare_first_run_can_cancel_onboarding(self) -> None:
         with (
@@ -314,7 +428,7 @@ class CliTests(unittest.TestCase):
         updated = configured_defaults(Path("/new-vault"))
         with (
             patch("lecture_util.cli._interactive_terminal", return_value=True),
-            patch("lecture_util.cli.load_config", return_value=existing),
+            patch("lecture_util.cli.load_onboarding_config", return_value=existing),
             patch("lecture_util.cli.run_onboarding", return_value=updated) as onboarding,
             patch("lecture_util.cli.save_config", return_value=updated) as save,
         ):

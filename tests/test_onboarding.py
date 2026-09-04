@@ -21,6 +21,7 @@ def create_vault(root: Path) -> None:
 def initial_config(vault: Path) -> AppConfig:
     return AppConfig(
         vault_root=vault,
+        video_root=vault.parent / "videos",
         semester_start="2026-08-31",
         whisper_model="large-v3",
         language="auto",
@@ -41,6 +42,10 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                     app.query_one("#vault-root", Input).value,
                     str(vault),
                 )
+                self.assertEqual(
+                    app.query_one("#video-root", Input).value,
+                    str(vault.parent / "videos"),
+                )
                 app.query_one("#semester-start", Input).value = "2026-09-01"
                 app.query_one("#device", Select).value = "cpu"
                 app.query_one("#whisper-model", Input).value = "turbo"
@@ -52,6 +57,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(config)
             assert config is not None
             self.assertEqual(config.vault_root, vault.resolve())
+            self.assertEqual(config.video_root, (vault.parent / "videos").resolve())
             self.assertEqual(config.semester_start, "2026-09-01")
             self.assertEqual(config.device, "cpu")
             self.assertEqual(config.whisper_model, "turbo")
@@ -75,6 +81,41 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
             app = OnboardingApp(initial_config(Path(directory) / "missing"))
 
             async with app.run_test(size=(100, 32)) as pilot:
+                await pilot.press("escape")
+
+            self.assertIsNone(app.return_value)
+
+    async def test_video_path_inside_vault_requires_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            create_vault(vault)
+            app = OnboardingApp(initial_config(vault))
+
+            async with app.run_test(size=(100, 32)) as pilot:
+                app.query_one("#video-root", Input).value = str(vault / "Videos")
+                await pilot.click("#save")
+                await pilot.pause()
+                await pilot.click("#confirm-video-root")
+
+            config = app.return_value
+            self.assertIsNotNone(config)
+            assert config is not None
+            self.assertEqual(config.video_root, (vault / "Videos").resolve())
+            self.assertTrue(config.video_in_vault_allowed)
+
+    async def test_vault_video_confirmation_can_go_back(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            create_vault(vault)
+            app = OnboardingApp(initial_config(vault))
+
+            async with app.run_test(size=(100, 32)) as pilot:
+                app.query_one("#video-root", Input).value = str(vault / "Videos")
+                await pilot.click("#save")
+                await pilot.pause()
+                await pilot.click("#cancel-video-root")
+                await pilot.pause()
+                self.assertTrue(app.is_running)
                 await pilot.press("escape")
 
             self.assertIsNone(app.return_value)

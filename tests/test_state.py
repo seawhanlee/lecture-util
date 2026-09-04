@@ -53,6 +53,21 @@ class RunStateTests(unittest.TestCase):
             self.assertEqual(replaced.data["tags"], ["second"])
             self.assertEqual(paths.root, replaced.paths.root)
 
+    def test_workspace_can_keep_video_outside_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            video = root / "videos" / "Course" / "1주차" / "Title.mp4"
+
+            paths, _ = create_workspace(
+                "https://example.com/index.m3u8",
+                root / "cache",
+                video_path=video,
+            )
+
+            self.assertEqual(paths.video, video)
+            self.assertTrue(paths.root.is_dir())
+            self.assertFalse(video.parent.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

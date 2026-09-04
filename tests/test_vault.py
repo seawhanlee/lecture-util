@@ -12,6 +12,7 @@ from lecture_util.vault import (
     default_semester_start,
     discover_courses,
     ensure_paths_available,
+    lecture_video_path,
     lecture_week,
     publish_lecture_notes,
     published_lecture_paths,
@@ -127,3 +128,20 @@ def test_custom_semester_start_selects_week_directory(tmp_path: Path) -> None:
     )
 
     assert paths.summary.parent == course.lectures / "2주차"
+
+
+def test_video_path_uses_course_week_and_title(tmp_path: Path) -> None:
+    create_course(tmp_path, "공기역학특론")
+    course = resolve_course("공기역학특론", tmp_path)
+
+    path = lecture_video_path(
+        tmp_path / "videos",
+        course,
+        "2026-09-14",
+        "압축성 유동",
+        semester_start="2026-09-07",
+    )
+
+    assert path == (
+        tmp_path / "videos" / "공기역학특론" / "2주차" / "압축성 유동.mp4"
+    )

@@ -19,23 +19,26 @@ from lecture_util.vault import (
 )
 
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 SUPPORTED_DEVICES = ("auto", "mlx", "cuda", "cpu")
 
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     vault_root: Path
+    video_root: Path
     semester_start: str
     whisper_model: str = "large-v3"
     language: str = "auto"
     device: str = "auto"
     llm_model: str | None = None
+    video_in_vault_allowed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["version"] = CONFIG_VERSION
         data["vault_root"] = str(self.vault_root)
+        data["video_root"] = str(self.video_root)
         return data
 
 
@@ -48,6 +51,7 @@ def default_config_path() -> Path:
 def default_app_config(reference: date | None = None) -> AppConfig:
     return AppConfig(
         vault_root=DEFAULT_VAULT_ROOT,
+        video_root=Path.home() / "Videos" / "lecture-util",
         semester_start=default_semester_start(reference),
     )
 
@@ -63,12 +67,19 @@ def validate_app_config(
     config: AppConfig,
     *,
     validate_vault: bool = True,
+    allow_missing_video_root: bool = True,
+    allow_unconfirmed_video_root: bool = False,
 ) -> AppConfig:
     vault_root = config.vault_root.expanduser()
     if not vault_root.is_absolute():
         vault_root = (Path.cwd() / vault_root).resolve()
     else:
         vault_root = vault_root.resolve()
+    video_root = config.video_root.expanduser()
+    if not video_root.is_absolute():
+        video_root = (Path.cwd() / video_root).resolve()
+    else:
+        video_root = video_root.resolve()
 
     semester_start = validate_semester_start(config.semester_start)
     whisper_model = config.whisper_model.strip()
@@ -86,14 +97,47 @@ def validate_app_config(
 
     if validate_vault:
         discover_courses(vault_root)
+    if video_root.exists() and not video_root.is_dir():
+        raise LectureUtilError(
+            f"Video storage path is not a directory: {video_root}"
+        )
+    if not allow_missing_video_root and not video_root.is_dir():
+        raise LectureUtilError(
+            f"Video storage directory does not exist: {video_root}"
+        )
+
+    video_in_vault = video_root == vault_root or video_root.is_relative_to(vault_root)
+    if (
+        video_in_vault
+        and not config.video_in_vault_allowed
+        and not allow_unconfirmed_video_root
+    ):
+        raise LectureUtilError(
+            "Video storage is inside the Obsidian Vault and requires explicit confirmation."
+        )
 
     return AppConfig(
         vault_root=vault_root,
+        video_root=video_root,
         semester_start=semester_start,
         whisper_model=whisper_model,
         language=language,
         device=config.device,
         llm_model=llm_model,
+        video_in_vault_allowed=(
+            config.video_in_vault_allowed if video_in_vault else False
+        ),
+    )
+
+
+def video_root_is_in_vault(config: AppConfig) -> bool:
+    normalized = validate_app_config(
+        config,
+        validate_vault=False,
+        allow_unconfirmed_video_root=True,
+    )
+    return normalized.video_root == normalized.vault_root or (
+        normalized.video_root.is_relative_to(normalized.vault_root)
     )
 
 
@@ -109,6 +153,7 @@ def app_config_from_dict(
             f"Unsupported configuration version: {data.get('version')!r}."
         )
     vault_root = _required_string(data, "vault_root", "Vault path")
+    video_root = _required_string(data, "video_root", "video storage path")
     semester_start = _required_string(data, "semester_start", "semester start date")
     whisper_model = _required_string(data, "whisper_model", "Whisper model")
     language = _required_string(data, "language", "lecture language")
@@ -116,16 +161,48 @@ def app_config_from_dict(
     llm_model_value = data.get("llm_model")
     if llm_model_value is not None and not isinstance(llm_model_value, str):
         raise LectureUtilError("Configured Codex model must be a string or null.")
+    video_in_vault_allowed = data.get("video_in_vault_allowed", False)
+    if not isinstance(video_in_vault_allowed, bool):
+        raise LectureUtilError(
+            "Configured Vault video storage confirmation must be true or false."
+        )
     return validate_app_config(
         AppConfig(
             vault_root=Path(vault_root),
+            video_root=Path(video_root),
             semester_start=semester_start,
             whisper_model=whisper_model,
             language=language,
             device=device,
             llm_model=llm_model_value,
+            video_in_vault_allowed=video_in_vault_allowed,
         ),
         validate_vault=validate_vault,
+    )
+
+
+def _legacy_app_config_from_dict(data: Any) -> AppConfig:
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise LectureUtilError("Configuration cannot be used for onboarding.")
+    llm_model = data.get("llm_model")
+    if llm_model is not None and not isinstance(llm_model, str):
+        raise LectureUtilError("Configured Codex model must be a string or null.")
+    return validate_app_config(
+        AppConfig(
+            vault_root=Path(_required_string(data, "vault_root", "Vault path")),
+            video_root=Path.home() / "Videos" / "lecture-util",
+            semester_start=_required_string(
+                data,
+                "semester_start",
+                "semester start date",
+            ),
+            whisper_model=_required_string(data, "whisper_model", "Whisper model"),
+            language=_required_string(data, "language", "lecture language"),
+            device=_required_string(data, "device", "transcription device"),
+            llm_model=llm_model,
+        ),
+        validate_vault=False,
+        allow_unconfirmed_video_root=True,
     )
 
 
@@ -157,11 +234,39 @@ def load_config(
         ) from error
 
 
+def load_onboarding_config(path: Path | None = None) -> AppConfig | None:
+    selected_path = path or default_config_path()
+    if not selected_path.exists():
+        return None
+    try:
+        data = json.loads(selected_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("version") == 1:
+            return _legacy_app_config_from_dict(data)
+        return app_config_from_dict(data, validate_vault=False)
+    except LectureUtilError:
+        raise
+    except (OSError, json.JSONDecodeError) as error:
+        raise LectureUtilError(
+            f"Could not load configuration {selected_path}: {error}."
+        ) from error
+
+
 def save_config(config: AppConfig, path: Path | None = None) -> AppConfig:
     selected_path = path or default_config_path()
-    validated = validate_app_config(config)
     try:
+        normalized = validate_app_config(config)
+        normalized.video_root.mkdir(parents=True, exist_ok=True)
+        if not os.access(normalized.video_root, os.W_OK):
+            raise LectureUtilError(
+                f"Video storage directory is not writable: {normalized.video_root}"
+            )
+        validated = validate_app_config(
+            normalized,
+            allow_missing_video_root=False,
+        )
         atomic_write_json(selected_path, validated.to_dict())
+    except LectureUtilError:
+        raise
     except OSError as error:
         raise LectureUtilError(
             f"Could not save configuration {selected_path}: {error}"

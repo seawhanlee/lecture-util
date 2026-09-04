@@ -15,6 +15,7 @@ from lecture_util.configuration import (
     default_app_config,
     default_config_path,
     load_config,
+    load_onboarding_config,
     normalize_tags,
     read_urls,
     resolve_prompt,
@@ -37,6 +38,7 @@ from lecture_util.vault import (
     default_cache_root,
     default_semester_start,
     ensure_paths_available,
+    lecture_video_path,
     publish_lecture_notes,
     published_lecture_paths,
     resolve_course,
@@ -93,6 +95,7 @@ def _execute_run(
     options: RunOptions,
     *,
     vault_root: Path = DEFAULT_VAULT_ROOT,
+    video_root: Path | None = None,
     cache_root: Path | None = None,
 ) -> None:
     course = resolve_course(options.course, vault_root)
@@ -109,6 +112,13 @@ def _execute_run(
         semester_start=semester_start,
     )
     ensure_paths_available(published)
+    video = lecture_video_path(
+        video_root or default_cache_root(),
+        course,
+        lecture_date,
+        title,
+        semester_start=semester_start,
+    )
 
     summarizer = CodexSummarizer(model=options.llm_model)
     console.rule(f"{course.name} · {lecture_date} {title}")
@@ -119,6 +129,7 @@ def _execute_run(
         options.url,
         cache_root or default_cache_root(),
         summarizer,
+        video_path=video,
         title=title,
         course=course.name,
         lecture_date=lecture_date,
@@ -173,7 +184,11 @@ def root_callback(ctx: typer.Context) -> None:
         if options is None:
             console.print("Cancelled before processing.")
             return
-        _execute_run(options, vault_root=config.vault_root)
+        _execute_run(
+            options,
+            vault_root=config.vault_root,
+            video_root=config.video_root,
+        )
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
@@ -243,6 +258,7 @@ def run_command(
                 force=force,
             ),
             vault_root=config.vault_root,
+            video_root=config.video_root,
         )
 
     _run_or_exit(action)
@@ -259,7 +275,7 @@ def onboard_command() -> None:
 
     def action() -> None:
         try:
-            initial = load_config(validate_vault=False)
+            initial = load_onboarding_config()
         except LectureUtilError as error:
             console.print(f"[yellow]Warning:[/yellow] {error}")
             initial = None
@@ -276,16 +292,49 @@ def onboard_command() -> None:
 @app.command("download")
 def download_command(
     url: str = typer.Argument(..., help="Public .m3u8 URL"),
-    output_dir: Path = typer.Option(default_cache_root(), "--output-dir", "-o"),
-    title: str | None = typer.Option(None, "--title"),
+    course: str = typer.Option(..., "--course", help="Course directory name"),
+    title: str = typer.Option(..., "--title", help="Lecture title"),
+    lecture_date: str | None = typer.Option(
+        None,
+        "--date",
+        help="Lecture date (YYYY-MM-DD; default: today)",
+    ),
+    output_dir: Path = typer.Option(
+        default_cache_root(),
+        "--output-dir",
+        "-o",
+        help="Cache root for audio, transcripts, and run state",
+    ),
     tag: list[str] | None = typer.Option(None, "--tag"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Download a lecture and extract transcription-ready audio."""
 
     def action() -> None:
+        config = load_config(required=True)
+        assert config is not None
         validate_hls_url(url)
-        paths, state = create_workspace(url, output_dir, title=title, tags=normalize_tags(tag))
+        selected_course = resolve_course(course, config.vault_root)
+        selected_date = validate_lecture_date(
+            lecture_date or date.today().isoformat()
+        )
+        selected_title = validate_title(title)
+        video = lecture_video_path(
+            config.video_root,
+            selected_course,
+            selected_date,
+            selected_title,
+            semester_start=config.semester_start,
+        )
+        paths, state = create_workspace(
+            url,
+            output_dir,
+            video_path=video,
+            title=selected_title,
+            course=selected_course.name,
+            lecture_date=selected_date,
+            tags=normalize_tags(tag),
+        )
         progress = ConsoleProgressReporter(("download", "audio"))
         download_stage(paths, state, force=force, progress=progress)
         audio_stage(paths, state, force=force, progress=progress)

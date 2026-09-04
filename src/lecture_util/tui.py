@@ -125,6 +125,7 @@ class LectureSetupApp(App[RunOptions]):
         defaults = default_app_config()
         self.config = config or AppConfig(
             vault_root=vault_root,
+            video_root=defaults.video_root,
             semester_start=defaults.semester_start,
             whisper_model=defaults.whisper_model,
             language=defaults.language,

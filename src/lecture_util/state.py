@@ -119,6 +119,7 @@ def create_workspace(
     url: str,
     output_dir: Path,
     *,
+    video_path: Path | None = None,
     title: str | None = None,
     course: str | None = None,
     lecture_date: str | None = None,
@@ -126,7 +127,10 @@ def create_workspace(
     published_transcript: Path | None = None,
     tags: list[str] | None = None,
 ) -> tuple[LecturePaths, RunState]:
-    paths = LecturePaths(output_dir / f"lecture-{lecture_id(url)}")
+    paths = LecturePaths(
+        output_dir / f"lecture-{lecture_id(url)}",
+        video_path=video_path,
+    )
     paths.root.mkdir(parents=True, exist_ok=True)
     return paths, RunState(
         paths,

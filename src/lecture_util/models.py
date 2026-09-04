@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import InitVar, asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,7 @@ class Transcript:
 @dataclass(slots=True)
 class LecturePaths:
     root: Path
+    video_path: InitVar[Path | None] = None
     video: Path = field(init=False)
     audio: Path = field(init=False)
     transcript_json: Path = field(init=False)
@@ -57,8 +58,8 @@ class LecturePaths:
     summary: Path = field(init=False)
     state: Path = field(init=False)
 
-    def __post_init__(self) -> None:
-        self.video = self.root / "source.mp4"
+    def __post_init__(self, video_path: Path | None) -> None:
+        self.video = video_path or self.root / "source.mp4"
         self.audio = self.root / "audio.wav"
         self.transcript_json = self.root / "transcript.json"
         self.transcript_markdown = self.root / "transcript.md"
