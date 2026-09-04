@@ -14,6 +14,7 @@ dependencies = [
     "faster-whisper>=1.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cublas-cu12>=12; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cudnn-cu12>=9; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "textual>=8.2.8",
 ]
 
 [dependency-groups]

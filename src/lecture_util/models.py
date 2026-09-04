@@ -56,7 +56,6 @@ class LecturePaths:
     transcript_srt: Path = field(init=False)
     summary: Path = field(init=False)
     state: Path = field(init=False)
-    summary_work: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.video = self.root / "source.mp4"
@@ -66,7 +65,6 @@ class LecturePaths:
         self.transcript_srt = self.root / "transcript.srt"
         self.summary = self.root / "summary.md"
         self.state = self.root / "run.json"
-        self.summary_work = self.root / "work" / "summary-chunks"
 
 
 @dataclass(slots=True)
@@ -80,5 +78,4 @@ class RunOptions:
     language: str
     device: str
     prompt: str
-    chunk_chars: int
     force: bool

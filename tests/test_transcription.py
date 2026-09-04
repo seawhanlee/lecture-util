@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import ctypes
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
+from lecture_util.errors import DependencyError
 from lecture_util.models import Segment, Transcript
 from lecture_util.transcription import (
+    _prepare_cuda_libraries,
+    _transcribe_faster,
     detect_device,
     format_timestamp,
     is_out_of_memory,
@@ -71,6 +76,74 @@ class TranscriptionTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "bad model"):
                     transcribe_audio(audio)
             self.assertEqual(transcribe.call_count, 1)
+
+    def test_cuda_wheel_libraries_are_preloaded_in_dependency_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packages = {
+                "nvidia.cublas": root / "cublas",
+                "nvidia.cudnn": root / "cudnn",
+            }
+            for package_path in packages.values():
+                (package_path / "lib").mkdir(parents=True)
+            filenames = ("libcublasLt.so.12", "libcublas.so.12", "libcudnn.so.9")
+            for filename in filenames[:2]:
+                (packages["nvidia.cublas"] / "lib" / filename).touch()
+            (packages["nvidia.cudnn"] / "lib" / filenames[2]).touch()
+
+            def fake_module(name: str, _hint: str) -> SimpleNamespace:
+                return SimpleNamespace(__path__=[str(packages[name])])
+
+            with (
+                patch("lecture_util.transcription._CUDA_LIBRARY_HANDLES", []),
+                patch("lecture_util.transcription._module", side_effect=fake_module),
+                patch(
+                    "lecture_util.transcription.ctypes.CDLL",
+                    side_effect=lambda *_args, **_kwargs: object(),
+                ) as load,
+            ):
+                _prepare_cuda_libraries()
+                _prepare_cuda_libraries()
+
+            self.assertEqual(
+                [Path(call.args[0]).name for call in load.call_args_list],
+                list(filenames),
+            )
+            self.assertTrue(
+                all(
+                    call.kwargs["mode"] == ctypes.RTLD_GLOBAL
+                    for call in load.call_args_list
+                )
+            )
+
+    def test_missing_cuda_wheel_library_has_installation_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            package = SimpleNamespace(__path__=[directory])
+            with (
+                patch("lecture_util.transcription._CUDA_LIBRARY_HANDLES", []),
+                patch("lecture_util.transcription._module", return_value=package),
+            ):
+                with self.assertRaisesRegex(DependencyError, "uv sync"):
+                    _prepare_cuda_libraries()
+
+    def test_cuda_transcription_prepares_wheel_libraries(self) -> None:
+        segment = SimpleNamespace(start=0, end=1, text="hello")
+        info = SimpleNamespace(language="en", duration=1)
+        model = MagicMock()
+        model.transcribe.return_value = ([segment], info)
+        faster_whisper = SimpleNamespace(WhisperModel=MagicMock(return_value=model))
+
+        with (
+            patch("lecture_util.transcription._prepare_cuda_libraries") as prepare,
+            patch("lecture_util.transcription._module", return_value=faster_whisper),
+        ):
+            segments, language, duration = _transcribe_faster(
+                Path("audio.wav"), "large-v3", "auto", "cuda"
+            )
+
+        prepare.assert_called_once_with()
+        self.assertEqual(segments, [Segment(0, 1, "hello")])
+        self.assertEqual((language, duration), ("en", 1))
 
     def test_explicit_cpu_is_always_allowed(self) -> None:
         with patch("lecture_util.transcription.platform.system", return_value="Plan9"):

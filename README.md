@@ -42,13 +42,13 @@ GPU를 사용할 수 없는 환경에서는 자동으로 CPU로 전환하지 않
 
 ## 인터랙티브 실행
 
-터미널에서 인자 없이 실행하면 입력 URL, 태그, Whisper 모델, 장치, 언어, Codex 모델과 프롬프트를 차례로 선택합니다.
+터미널에서 인자 없이 실행하면 간단한 설정 TUI가 열립니다. 기본 화면에는 URL과 출력 경로만 표시되며, 필요하면 접힌 고급 설정에서 제목·태그, Whisper 모델·장치·언어, Codex 모델과 요약 프롬프트를 변경할 수 있습니다.
 
 ```bash
 uv run lecture-util
 ```
 
-선택한 값은 현재 실행에만 사용됩니다. 파이프나 CI처럼 비대화형 환경에서 인자 없이 호출하면 대기하지 않고 종료합니다.
+`Run`을 선택하면 TUI가 닫힌 뒤 기존 콘솔 화면에서 다운로드·전사·요약 진행 상태를 표시합니다. `Cancel`이나 `Esc`로 실행 전에 취소할 수 있습니다. 선택한 값은 현재 실행에만 사용됩니다. 파이프나 CI처럼 비대화형 환경에서 인자 없이 호출하면 대기하지 않고 종료합니다.
 
 ## 비대화형 실행
 
@@ -67,11 +67,11 @@ uv run lecture-util run \
 uv run lecture-util run URL --llm-model MODEL
 ```
 
-Codex는 비대화형 `codex exec`로 임시 읽기 전용 작업공간에서 실행되며, 전사문 요약 외의 도구 사용이나 파일 변경을 지시하지 않습니다.
+Codex는 비대화형 `codex exec`로 강의 결과 디렉터리를 읽기 전용으로 열고 `transcript.md`를 직접 읽습니다. 파일 변경은 허용하지 않습니다.
 
 ### 진행 상태
 
-실행 중에는 현재 강의와 단계, 캐시 재사용 여부, 파일 크기, 전사 모델·언어·세그먼트 수, Codex 요약 청크와 경과 시간을 표시합니다.
+실행 중에는 현재 강의와 단계, 캐시 재사용 여부, 파일 크기, 전사 모델·언어·세그먼트 수, Codex 요약 상태와 경과 시간을 표시합니다.
 
 ```text
 ──────────────────────────── Lecture 1/1 ────────────────────────────
@@ -82,9 +82,8 @@ https://example.com/lecture/index.m3u8
 ✓ [2/4] Extracted 61.4 MiB in 0.9s
 → [3/4] Transcribing with Whisper large-v3 on cuda (this may take several minutes)
 ✓ [3/4] Created 282 segments in 2m 12s (faster-whisper/large-v3, ko)
-→ [4/4] Summarizing with Codex (2 transcript chunks)
-· [4/4] Summarizing transcript chunk 1/2 with Codex
-· [4/4] Merging notes 1/1 in round 1 with Codex
+→ [4/4] Summarizing transcript file with Codex
+· [4/4] Summarizing transcript.md with Codex
 ✓ [4/4] Wrote summary in 1m 58s to output/lecture-0123456789/summary.md
 Complete output/lecture-0123456789 (4m 35s)
 ```
@@ -106,7 +105,7 @@ uv run lecture-util run --input lectures.txt \
   --tag week-1
 ```
 
-기본 요약은 `이 강의를 요약해`라는 요청 뒤에 녹취록을 Markdown 코드 펜스로 감싼 plain text 사용자 프롬프트를 전달합니다. 다음 옵션 중 하나로 요청 문구를 교체할 수 있습니다.
+기본 요약은 `이 강의를 요약해`라는 요청과 함께 강의별 `transcript.md` 파일을 Codex가 직접 읽도록 합니다. URL 목록을 처리할 때는 각 영상마다 별도의 Codex 인스턴스를 순차 실행합니다. 다음 옵션 중 하나로 요청 문구를 교체할 수 있습니다.
 
 ```bash
 uv run lecture-util run URL \
@@ -115,8 +114,6 @@ uv run lecture-util run URL \
 uv run lecture-util run URL \
   --prompt-file prompts/exam-notes.md
 ```
-
-긴 전사문은 기본 12,000자 단위로 나누고 각 부분을 ` ``` ` 코드 펜스로 감싸 요약한 뒤, 부분 요약도 같은 방식으로 재귀적으로 병합합니다. `--chunk-chars`로 크기를 조정할 수 있습니다.
 
 ## 단계별 명령과 결과
 
@@ -136,11 +133,10 @@ output/lecture-<URL 해시>/
 ├── transcript.md
 ├── transcript.srt
 ├── summary.md
-├── run.json
-└── work/summary-chunks/
+└── run.json
 ```
 
-태그는 `run.json`의 `tags` 배열에만 저장됩니다. 같은 URL을 다시 실행하면 완료된 단계와 요약 청크를 재사용합니다. 다른 Whisper 모델·언어·장치를 지정하면 전사를 다시 수행하며, `--force`는 모든 단계를 다시 실행합니다.
+태그는 `run.json`의 `tags` 배열에만 저장됩니다. 같은 URL을 다시 실행하면 완료된 단계와 요약을 재사용합니다. 다른 Whisper 모델·언어·장치를 지정하면 전사를 다시 수행하며, `--force`는 모든 단계를 다시 실행합니다.
 
 기본 전사 모델은 `large-v3`입니다. 실제 메모리 부족 오류가 발생한 경우에만 메모리를 해제하고 `turbo`로 한 번 다시 시도하며, 요청 모델·실제 모델·전환 이유는 `run.json`과 `transcript.json`에 남습니다.
 

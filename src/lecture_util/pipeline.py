@@ -221,7 +221,6 @@ def run_lecture(
     language: str = "auto",
     device: str = "auto",
     prompt: str = DEFAULT_PROMPT,
-    chunk_chars: int = 12_000,
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> LecturePaths:
@@ -238,12 +237,11 @@ def run_lecture(
     )
     summary_stage(
         transcript,
+        paths.transcript_markdown,
         paths.summary,
-        paths.summary_work,
         state,
         summarizer,
         prompt=prompt,
-        chunk_chars=chunk_chars,
         force=force,
         progress=progress,
     )

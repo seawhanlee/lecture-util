@@ -14,7 +14,12 @@ class Summarizer(Protocol):
     name: str
     model: str | None
 
-    def generate(self, developer_prompt: str, user_prompt: str) -> str: ...
+    def generate(
+        self,
+        developer_prompt: str,
+        user_prompt: str,
+        transcript_path: Path,
+    ) -> str: ...
 
 
 def _require_output(content: str | None, backend: str) -> str:
@@ -30,10 +35,11 @@ def _require_cli(name: str) -> str:
     return executable
 
 
-def _agent_prompt(developer_prompt: str, user_prompt: str) -> str:
+def _agent_prompt(developer_prompt: str, user_prompt: str, transcript_name: str) -> str:
     return (
         f"{developer_prompt}\n\n"
-        "Do not use tools and do not modify any files. Return only the requested Markdown.\n\n"
+        f"The lecture transcript is attached as the local file `{transcript_name}`. "
+        "Read that file, do not modify any files, and return only the requested Markdown.\n\n"
         f"{user_prompt}"
     )
 
@@ -43,11 +49,18 @@ class CodexSummarizer:
     model: str | None = None
     name: str = "codex"
 
-    def generate(self, developer_prompt: str, user_prompt: str) -> str:
+    def generate(
+        self,
+        developer_prompt: str,
+        user_prompt: str,
+        transcript_path: Path,
+    ) -> str:
         codex = _require_cli("codex")
+        if not transcript_path.is_file():
+            raise LectureUtilError(f"Transcript file does not exist: {transcript_path}")
+        transcript_path = transcript_path.resolve()
         with tempfile.TemporaryDirectory(prefix="lecture-util-codex-") as directory:
-            workspace = Path(directory)
-            output = workspace / "response.md"
+            output = Path(directory) / "response.md"
             argv = [
                 codex,
                 "exec",
@@ -58,7 +71,7 @@ class CodexSummarizer:
                 "--color",
                 "never",
                 "--cd",
-                str(workspace),
+                str(transcript_path.parent),
                 "--output-last-message",
                 str(output),
             ]
@@ -67,7 +80,7 @@ class CodexSummarizer:
             argv.append("-")
             result = subprocess.run(
                 argv,
-                input=_agent_prompt(developer_prompt, user_prompt),
+                input=_agent_prompt(developer_prompt, user_prompt, transcript_path.name),
                 capture_output=True,
                 text=True,
                 check=False,

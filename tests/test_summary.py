@@ -7,7 +7,8 @@ from pathlib import Path
 
 from lecture_util.models import Segment, Transcript
 from lecture_util.progress import ProgressEvent
-from lecture_util.summary import DEFAULT_PROMPT, MERGE_PROMPT, chunk_lines, summarize_transcript
+from lecture_util.state import create_workspace
+from lecture_util.summary import DEFAULT_PROMPT, summarize_transcript, summary_stage
 
 
 @dataclass
@@ -15,9 +16,16 @@ class FakeSummarizer:
     model: str | None = "fake-model"
     name: str = "fake"
     prompts: list[str] = field(default_factory=list)
+    transcript_paths: list[Path] = field(default_factory=list)
 
-    def generate(self, developer_prompt: str, user_prompt: str) -> str:
+    def generate(
+        self,
+        developer_prompt: str,
+        user_prompt: str,
+        transcript_path: Path,
+    ) -> str:
         self.prompts.append(user_prompt)
+        self.transcript_paths.append(transcript_path)
         return f"# Note {len(self.prompts)}\n\nA compact result."
 
 
@@ -36,45 +44,62 @@ def sample_transcript(segment_count: int = 8) -> Transcript:
 
 
 class SummaryTests(unittest.TestCase):
-    def test_chunk_lines_preserves_all_content(self) -> None:
-        lines = ["a" * 600, "b" * 600, "c" * 600]
-        chunks = chunk_lines(lines, 1000)
-        self.assertEqual(chunks, lines)
-
-    def test_summary_chunks_and_merges(self) -> None:
+    def test_summary_reads_one_transcript_file_in_one_codex_instance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             summarizer = FakeSummarizer()
             events: list[ProgressEvent] = []
+            transcript_path = Path(directory) / "transcript.md"
+            transcript_path.write_text("# Transcript\n\nsegment 0", encoding="utf-8")
             result, fingerprint = summarize_transcript(
                 sample_transcript(),
+                transcript_path,
                 summarizer,
-                Path(directory),
-                chunk_chars=1000,
                 progress=events.append,
             )
             self.assertTrue(result.startswith("# Note"))
             self.assertEqual(len(fingerprint), 16)
-            self.assertGreater(len(summarizer.prompts), 1)
-            self.assertTrue(summarizer.prompts[0].startswith(f"{DEFAULT_PROMPT}\n\n```\n"))
-            self.assertIn("segment 0", summarizer.prompts[0])
-            self.assertTrue(summarizer.prompts[0].endswith("```"))
-            self.assertTrue(any(prompt.startswith(MERGE_PROMPT) for prompt in summarizer.prompts))
-            self.assertTrue(any("transcript chunk 1/" in event.message for event in events))
-            self.assertTrue(any("Merging notes" in event.message for event in events))
+            self.assertEqual(summarizer.prompts, [DEFAULT_PROMPT])
+            self.assertEqual(summarizer.transcript_paths, [transcript_path])
+            self.assertNotIn("segment 0", summarizer.prompts[0])
+            self.assertNotIn("```", summarizer.prompts[0])
+            self.assertTrue(any("transcript.md" in event.message for event in events))
 
-    def test_completed_chunks_are_reused(self) -> None:
+    def test_completed_summary_is_reused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            work_dir = Path(directory)
+            paths, state = create_workspace(
+                "https://example.com/index.m3u8",
+                Path(directory),
+            )
+            paths.transcript_markdown.write_text("# Transcript\n", encoding="utf-8")
             first = FakeSummarizer()
-            first_result, _ = summarize_transcript(
-                sample_transcript(2), first, work_dir, chunk_chars=1000
+            first_result = summary_stage(
+                sample_transcript(2),
+                paths.transcript_markdown,
+                paths.summary,
+                state,
+                first,
             )
             second = FakeSummarizer()
-            second_result, _ = summarize_transcript(
-                sample_transcript(2), second, work_dir, chunk_chars=1000
+            second_result = summary_stage(
+                sample_transcript(2),
+                paths.transcript_markdown,
+                paths.summary,
+                state,
+                second,
             )
             self.assertEqual(first_result, second_result)
             self.assertEqual(second.prompts, [])
+
+            paths.transcript_markdown.write_text("# Changed transcript\n", encoding="utf-8")
+            third = FakeSummarizer()
+            summary_stage(
+                sample_transcript(2),
+                paths.transcript_markdown,
+                paths.summary,
+                state,
+                third,
+            )
+            self.assertEqual(third.prompts, [DEFAULT_PROMPT])
 
     def test_default_user_prompt_is_exact_korean_request(self) -> None:
         self.assertEqual(DEFAULT_PROMPT, "이 강의를 요약해")

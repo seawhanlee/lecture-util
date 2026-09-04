@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import gc
 import importlib
 import json
@@ -18,6 +19,13 @@ MLX_MODELS = {
     "large-v3": "mlx-community/whisper-large-v3-mlx",
     "turbo": "mlx-community/whisper-large-v3-turbo",
 }
+
+_CUDA_LIBRARY_HANDLES: list[Any] = []
+_CUDA_LIBRARIES = (
+    ("nvidia.cublas", "libcublasLt.so.12"),
+    ("nvidia.cublas", "libcublas.so.12"),
+    ("nvidia.cudnn", "libcudnn.so.9"),
+)
 
 
 def detect_device(requested: str = "auto") -> str:
@@ -75,6 +83,37 @@ def _module(name: str, installation_hint: str) -> Any:
         raise DependencyError(installation_hint) from error
 
 
+def _bundled_library_path(package: str, filename: str) -> Path:
+    module = _module(
+        package,
+        "CUDA runtime libraries are not installed. Run 'uv sync' on NVIDIA Linux.",
+    )
+    for package_path in getattr(module, "__path__", ()):
+        candidate = Path(package_path) / "lib" / filename
+        if candidate.is_file():
+            return candidate
+    raise DependencyError(
+        f"CUDA runtime library {filename} was not found. Run 'uv sync' on NVIDIA Linux."
+    )
+
+
+def _prepare_cuda_libraries() -> None:
+    """Make NVIDIA wheel libraries visible to CTranslate2's dynamic loader."""
+    if _CUDA_LIBRARY_HANDLES:
+        return
+
+    handles: list[Any] = []
+    for package, filename in _CUDA_LIBRARIES:
+        path = _bundled_library_path(package, filename)
+        try:
+            handles.append(ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL))
+        except OSError as error:
+            raise DependencyError(
+                f"Could not load CUDA runtime library {path}: {error}"
+            ) from error
+    _CUDA_LIBRARY_HANDLES.extend(handles)
+
+
 def _transcribe_mlx(audio: Path, model: str, language: str) -> tuple[list[Segment], str, float]:
     mlx_whisper = _module(
         "mlx_whisper",
@@ -97,6 +136,8 @@ def _transcribe_mlx(audio: Path, model: str, language: str) -> tuple[list[Segmen
 def _transcribe_faster(
     audio: Path, model: str, language: str, device: str
 ) -> tuple[list[Segment], str, float]:
+    if device == "cuda":
+        _prepare_cuda_libraries()
     faster_whisper = _module(
         "faster_whisper",
         "faster-whisper is not installed. Run 'uv sync' on Linux and install CUDA 12 with cuDNN 9.",
