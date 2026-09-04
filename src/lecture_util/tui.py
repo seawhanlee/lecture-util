@@ -27,11 +27,13 @@ from lecture_util.errors import LectureUtilError
 from lecture_util.models import RunOptions
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
+    default_semester_start,
     discover_courses,
     ensure_paths_available,
     published_lecture_paths,
     resolve_course,
     validate_lecture_date,
+    validate_semester_start,
     validate_title,
 )
 
@@ -118,6 +120,7 @@ class LectureSetupApp(App[RunOptions]):
         self.courses = discover_courses(vault_root)
 
     def compose(self) -> ComposeResult:
+        lecture_date = _week_monday()
         with VerticalScroll(id="form"):
             yield Label("lecture-util", id="title")
             yield Label("Course", classes="field-label")
@@ -129,13 +132,18 @@ class LectureSetupApp(App[RunOptions]):
                 id="course",
             )
             yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
-            yield Input(value=_week_monday(), id="lecture-date")
+            yield Input(value=lecture_date, id="lecture-date")
             yield Label("Lecture title", classes="field-label")
             yield Input(placeholder="압축성 유동", id="lecture-title")
             yield Label("Public .m3u8 URL", classes="field-label")
             yield Input(placeholder="https://example.com/lecture/index.m3u8", id="source")
 
             with Collapsible(title="Advanced settings", collapsed=True):
+                yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
+                yield Input(
+                    value=default_semester_start(date.fromisoformat(lecture_date)),
+                    id="semester-start",
+                )
                 yield Label("Tags (comma-separated, optional)", classes="field-label")
                 yield Input(placeholder="operating-systems, midterm", id="tags")
                 yield Checkbox("Force every stage to run again", id="force")
@@ -238,10 +246,20 @@ class LectureSetupApp(App[RunOptions]):
         lecture_date = validate_lecture_date(
             self.query_one("#lecture-date", Input).value
         )
+        semester_start = validate_semester_start(
+            self.query_one("#semester-start", Input).value
+        )
         title = validate_title(self.query_one("#lecture-title", Input).value)
         course_name = self._select_value("#course")
         course = resolve_course(course_name, self.vault_root)
-        ensure_paths_available(published_lecture_paths(course, lecture_date, title))
+        ensure_paths_available(
+            published_lecture_paths(
+                course,
+                lecture_date,
+                title,
+                semester_start=semester_start,
+            )
+        )
 
         prompt_mode = self._select_value("#prompt-mode")
         if prompt_mode == "inline":
@@ -267,6 +285,7 @@ class LectureSetupApp(App[RunOptions]):
             url=url,
             course=course_name,
             lecture_date=lecture_date,
+            semester_start=semester_start,
             title=title,
             llm_model=llm_model,
             tags=normalize_tags([raw_tags] if raw_tags else None),

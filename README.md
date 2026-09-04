@@ -24,11 +24,12 @@ uv run lecture-util doctor
 uv run lecture-util
 ```
 
-작업이 끝나면 선택한 과목의 강의 폴더에 다음 두 노트가 생깁니다.
+작업이 끝나면 선택한 과목의 강의 폴더 아래에 주차 폴더를 자동으로 만들고 다음 두 노트를 저장합니다.
 
 ```text
-YYYY-MM-DD 제목.md
-YYYY-MM-DD 제목 전사.md
+N주차/
+├── YYYY-MM-DD 제목.md
+└── YYYY-MM-DD 제목 전사.md
 ```
 
 ## 요구 사항과 설치
@@ -100,7 +101,7 @@ Vault 경로는 다음 값으로 고정되어 있습니다.
 - 두 폴더가 모두 있거나 둘 다 없으면 해당 과목은 유효하지 않습니다.
 - 요약 노트는 `<과목명> MOC.md`를 `[[과목명 MOC|과목명]]` 형식으로 연결합니다.
 
-도구는 과목이나 강의 폴더를 자동으로 만들지 않습니다. 먼저 Vault 구조를 준비한 다음 실행하세요.
+도구는 과목이나 `Lecture`/`Lectures` 폴더를 자동으로 만들지 않습니다. 먼저 Vault 구조를 준비하세요. `1주차`, `2주차` 같은 하위 폴더는 강의를 발행할 때 자동으로 만듭니다.
 
 ## TUI 사용법
 
@@ -127,6 +128,7 @@ uv run lecture-util
 
 | 항목 | 기본값 | 설명 |
 | --- | --- | --- |
+| Semester start date | 가장 최근의 8월 31일 | 주차 계산의 기준일이며 `YYYY-MM-DD` 형식으로 변경 가능 |
 | Tags | 없음 | 쉼표로 구분하며 캐시의 `run.json`에만 기록 |
 | Force every stage | 꺼짐 | 다운로드부터 요약까지 캐시 단계를 모두 다시 실행 |
 | Transcription device | `auto` | `mlx`, `cuda`, `cpu` 중 직접 선택 가능 |
@@ -152,7 +154,7 @@ https://example.com/lecture/index.m3u8
 ✓ [3/4] Created 282 segments in 2m 12s (faster-whisper/large-v3, ko)
 → [4/4] Summarizing transcript file with Codex
 ✓ [4/4] Wrote summary in 1m 58s to /home/seawhan/.cache/lecture-util/lecture-0123456789/summary.md
-Complete /home/seawhan/Documents/학부연구생/10 Academics/Courses/공기역학특론/Lectures/2026-09-04 압축성 유동.md (4m 35s)
+Complete /home/seawhan/Documents/학부연구생/10 Academics/Courses/공기역학특론/Lectures/1주차/2026-09-04 압축성 유동.md (4m 35s)
 ```
 
 파이프나 CI처럼 stdin/stdout이 터미널이 아닌 환경에서 인자 없이 호출하면 TUI를 기다리지 않고 종료 코드 2로 끝납니다.
@@ -170,6 +172,16 @@ uv run lecture-util run \
 ```
 
 과목 이름은 `Courses` 아래의 실제 디렉터리 이름과 정확히 일치해야 합니다. 한 번에 강의 하나만 처리하며 URL 목록을 받는 `--input` 배치 모드는 지원하지 않습니다.
+
+기본 학기 시작일은 강의일 기준 가장 최근의 8월 31일입니다. 시작일부터 7일씩 `1주차`, `2주차` 등으로 계산하며, 다른 기준일이 필요하면 지정할 수 있습니다.
+
+```bash
+uv run lecture-util run URL \
+  --course '공기역학특론' \
+  --date 2026-09-14 \
+  --semester-start 2026-09-07 \
+  --title '압축성 유동'
+```
 
 ### 전사 옵션 지정
 
@@ -231,7 +243,7 @@ uv run lecture-util run URL \
 
 ### Vault의 요약 노트
 
-선택한 강의 폴더에 `YYYY-MM-DD 제목.md`를 만듭니다.
+선택한 강의 폴더의 `N주차`에 `YYYY-MM-DD 제목.md`를 만듭니다.
 
 ```markdown
 ---
@@ -261,7 +273,7 @@ Codex가 생성한 요약...
 
 ### Vault의 전사 노트
 
-같은 폴더에 `YYYY-MM-DD 제목 전사.md`를 만듭니다. `lecture-transcript` frontmatter, 원본 URL, 요약 노트 링크와 구간별 타임스탬프가 포함됩니다.
+같은 주차 폴더에 `YYYY-MM-DD 제목 전사.md`를 만듭니다. `lecture-transcript` frontmatter, 원본 URL, 요약 노트 링크와 구간별 타임스탬프가 포함됩니다.
 
 ```markdown
 # 2026-09-04 압축성 유동 전사

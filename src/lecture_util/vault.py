@@ -12,6 +12,8 @@ from lecture_util.state import atomic_write_text
 DEFAULT_VAULT_ROOT = Path("/home/seawhan/Documents/학부연구생")
 COURSES_DIRECTORY = Path("10 Academics/Courses")
 LECTURE_DIRECTORY_NAMES = ("Lecture", "Lectures")
+DEFAULT_SEMESTER_START_MONTH = 8
+DEFAULT_SEMESTER_START_DAY = 31
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,14 +84,43 @@ def resolve_course(course_name: str, vault_root: Path = DEFAULT_VAULT_ROOT) -> C
 
 
 def validate_lecture_date(value: str) -> str:
+    return _validate_iso_date(value, "Lecture date")
+
+
+def validate_semester_start(value: str) -> str:
+    return _validate_iso_date(value, "Semester start date")
+
+
+def _validate_iso_date(value: str, label: str) -> str:
     normalized = value.strip()
     try:
         parsed = date.fromisoformat(normalized)
     except ValueError as error:
-        raise LectureUtilError("Lecture date must use YYYY-MM-DD format.") from error
+        raise LectureUtilError(f"{label} must use YYYY-MM-DD format.") from error
     if parsed.isoformat() != normalized:
-        raise LectureUtilError("Lecture date must use YYYY-MM-DD format.")
+        raise LectureUtilError(f"{label} must use YYYY-MM-DD format.")
     return normalized
+
+
+def default_semester_start(reference: date | None = None) -> str:
+    current = reference or date.today()
+    candidate = date(
+        current.year,
+        DEFAULT_SEMESTER_START_MONTH,
+        DEFAULT_SEMESTER_START_DAY,
+    )
+    if current < candidate:
+        candidate = candidate.replace(year=current.year - 1)
+    return candidate.isoformat()
+
+
+def lecture_week(lecture_date: str, semester_start: str) -> int:
+    lecture = date.fromisoformat(validate_lecture_date(lecture_date))
+    start = date.fromisoformat(validate_semester_start(semester_start))
+    elapsed_days = (lecture - start).days
+    if elapsed_days < 0:
+        raise LectureUtilError("Lecture date cannot be before the semester start date.")
+    return elapsed_days // 7 + 1
 
 
 def validate_title(value: str) -> str:
@@ -105,13 +136,19 @@ def published_lecture_paths(
     course: Course,
     lecture_date: str,
     title: str,
+    *,
+    semester_start: str | None = None,
 ) -> PublishedLecturePaths:
     normalized_date = validate_lecture_date(lecture_date)
     normalized_title = validate_title(title)
+    selected_start = semester_start or default_semester_start(
+        date.fromisoformat(normalized_date)
+    )
+    week_directory = course.lectures / f"{lecture_week(normalized_date, selected_start)}주차"
     stem = f"{normalized_date} {normalized_title}"
     return PublishedLecturePaths(
-        summary=course.lectures / f"{stem}.md",
-        transcript=course.lectures / f"{stem} 전사.md",
+        summary=week_directory / f"{stem}.md",
+        transcript=week_directory / f"{stem} 전사.md",
     )
 
 
@@ -227,6 +264,7 @@ def publish_lecture_notes(
     transcript: str,
 ) -> None:
     ensure_paths_available(paths)
+    paths.summary.parent.mkdir(parents=True, exist_ok=True)
     summary_note = _summary_note(
         course=course,
         lecture_date=lecture_date,

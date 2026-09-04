@@ -22,6 +22,7 @@ def options() -> RunOptions:
         url=URL,
         course=COURSE,
         lecture_date="2026-09-04",
+        semester_start="2026-08-31",
         title="압축성 유동",
         llm_model=None,
         tags=["os", "exam"],
@@ -72,12 +73,35 @@ class CliTests(unittest.TestCase):
         self.assertEqual(selected.url, URL)
         self.assertEqual(selected.course, COURSE)
         self.assertEqual(selected.lecture_date, "2026-09-04")
+        self.assertIsNone(selected.semester_start)
+
+    def test_run_accepts_custom_semester_start(self) -> None:
+        with patch("lecture_util.cli._execute_run") as execute:
+            result = self.runner.invoke(
+                app,
+                [
+                    "run",
+                    URL,
+                    "--course",
+                    COURSE,
+                    "--date",
+                    "2026-09-14",
+                    "--semester-start",
+                    "2026-09-07",
+                    "--title",
+                    "압축성 유동",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(execute.call_args.args[0].semester_start, "2026-09-07")
 
     def test_help_exposes_single_lecture_vault_options(self) -> None:
         result = self.runner.invoke(app, ["run", "--help"])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("--course", result.output)
         self.assertIn("--date", result.output)
+        self.assertIn("--semester-start", result.output)
         self.assertIn("--title", result.output)
         self.assertNotIn("--input", result.output)
         self.assertNotIn("--output-dir", result.output)
@@ -111,8 +135,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(
                 run_lecture.call_args.kwargs["lecture_date"], "2026-09-04"
             )
-            summary = lecture_dir / "2026-09-04 압축성 유동.md"
-            transcript = lecture_dir / "2026-09-04 압축성 유동 전사.md"
+            summary = lecture_dir / "1주차" / "2026-09-04 압축성 유동.md"
+            transcript = lecture_dir / "1주차" / "2026-09-04 압축성 유동 전사.md"
             self.assertTrue(summary.is_file())
             self.assertTrue(transcript.is_file())
 
@@ -122,7 +146,9 @@ class CliTests(unittest.TestCase):
             vault = root / "vault"
             lecture_dir = vault / COURSES_DIRECTORY / COURSE / "Lectures"
             lecture_dir.mkdir(parents=True)
-            (lecture_dir / "2026-09-04 압축성 유동.md").write_text(
+            week_dir = lecture_dir / "1주차"
+            week_dir.mkdir()
+            (week_dir / "2026-09-04 압축성 유동.md").write_text(
                 "existing", encoding="utf-8"
             )
             with (

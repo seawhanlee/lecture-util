@@ -80,3 +80,4 @@ class RunOptions:
     device: str
     prompt: str
     force: bool
+    semester_start: str | None = None

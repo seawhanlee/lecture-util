@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 import sys
 from time import monotonic
@@ -25,11 +26,13 @@ from lecture_util.tui import run_tui
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
     default_cache_root,
+    default_semester_start,
     ensure_paths_available,
     publish_lecture_notes,
     published_lecture_paths,
     resolve_course,
     validate_lecture_date,
+    validate_semester_start,
     validate_title,
 )
 
@@ -85,8 +88,17 @@ def _execute_run(
 ) -> None:
     course = resolve_course(options.course, vault_root)
     lecture_date = validate_lecture_date(options.lecture_date)
+    semester_start = validate_semester_start(
+        options.semester_start
+        or default_semester_start(date.fromisoformat(lecture_date))
+    )
     title = validate_title(options.title)
-    published = published_lecture_paths(course, lecture_date, title)
+    published = published_lecture_paths(
+        course,
+        lecture_date,
+        title,
+        semester_start=semester_start,
+    )
     ensure_paths_available(published)
 
     summarizer = CodexSummarizer(model=options.llm_model)
@@ -155,6 +167,11 @@ def run_command(
     url: str = typer.Argument(..., help="Public .m3u8 URL"),
     course: str = typer.Option(..., "--course", help="Course directory name"),
     lecture_date: str = typer.Option(..., "--date", help="Lecture date (YYYY-MM-DD)"),
+    semester_start: str | None = typer.Option(
+        None,
+        "--semester-start",
+        help="Semester start date (YYYY-MM-DD; default: most recent August 31)",
+    ),
     title: str = typer.Option(..., "--title", help="Lecture title"),
     llm_model: str | None = typer.Option(None, "--llm-model"),
     tag: list[str] | None = typer.Option(None, "--tag"),
@@ -175,6 +192,7 @@ def run_command(
                 url=validated_url,
                 course=course,
                 lecture_date=lecture_date,
+                semester_start=semester_start,
                 title=title,
                 llm_model=llm_model,
                 tags=normalize_tags(tag),

@@ -32,11 +32,19 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             vault = Path(directory)
             create_vault(vault)
             app = LectureSetupApp(vault)
-            with patch("lecture_util.tui._week_monday", return_value="2026-08-31"):
+            with (
+                patch("lecture_util.tui._week_monday", return_value="2026-08-31"),
+                patch(
+                    "lecture_util.tui.default_semester_start",
+                    return_value="2026-08-31",
+                ),
+            ):
                 async with app.run_test(size=(100, 40)):
                     value = app.query_one("#lecture-date", Input).value
+                    semester_start = app.query_one("#semester-start", Input).value
 
         self.assertEqual(value, "2026-08-31")
+        self.assertEqual(semester_start, "2026-08-31")
 
     async def test_default_form_builds_vault_run_options(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -45,6 +53,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "압축성 유동"
                 app.query_one("#source", Input).value = URL
                 app.query_one("#tags", Input).value = " os, exam, os "
@@ -56,6 +65,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options.url, URL)
         self.assertEqual(options.course, COURSE)
         self.assertEqual(options.lecture_date, "2026-09-04")
+        self.assertEqual(options.semester_start, "2026-08-31")
         self.assertEqual(options.title, "압축성 유동")
         self.assertEqual(options.tags, ["os", "exam"])
         self.assertEqual(options.device, "auto")
@@ -81,6 +91,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             )
             async with app.run_test(size=(100, 40)):
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#semester-start", Input).value = "2026-09-01"
                 app.query_one("#lecture-title", Input).value = "강의개요"
                 app.query_one("#source", Input).value = URL
                 app.query_one("#prompt-mode", Select).value = "file"
@@ -88,6 +99,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 options = app._build_options()
 
         self.assertEqual(options.course, COURSE)
+        self.assertEqual(options.semester_start, "2026-09-01")
         self.assertEqual(options.prompt, "Create exam notes.")
 
     async def test_space_opens_and_selects_course(self) -> None:
@@ -129,6 +141,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)):
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "강의개요"
                 app.query_one("#source", Input).value = URL
                 app.query_one("#prompt-mode", Select).value = "inline"
@@ -144,6 +157,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "강의개요"
                 app.query_one("#source", Input).value = URL
                 app.query_one("#course", Select).focus()
@@ -178,12 +192,15 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 / COURSES_DIRECTORY
                 / COURSE
                 / "Lectures"
+                / "1주차"
                 / "2026-09-04 압축성 유동.md"
             )
+            existing.parent.mkdir()
             existing.write_text("existing", encoding="utf-8")
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "압축성 유동"
                 app.query_one("#source", Input).value = URL
                 await pilot.click("#run")
