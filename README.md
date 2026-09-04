@@ -115,7 +115,7 @@ uv run lecture-util
 | 항목 | 설명 |
 | --- | --- |
 | Course | Vault에서 자동 탐색한 과목 선택지 |
-| Lecture date | 강의 날짜. `YYYY-MM-DD` 형식으로 직접 입력 |
+| Lecture date | 강의 날짜. 기본값은 프로그램을 실행한 주의 월요일이며 `YYYY-MM-DD` 형식으로 수정 가능 |
 | Lecture title | 파일명과 노트 제목에 사용할 강의 제목 |
 | Public `.m3u8` URL | 인증 없이 접근 가능한 HLS 재생목록 URL |
 

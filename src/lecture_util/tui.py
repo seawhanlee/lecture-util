@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -32,6 +33,11 @@ from lecture_util.vault import (
     validate_lecture_date,
     validate_title,
 )
+
+
+def _week_monday(today: date | None = None) -> str:
+    current_date = today or date.today()
+    return (current_date - timedelta(days=current_date.weekday())).isoformat()
 
 
 class LectureSetupApp(App[RunOptions]):
@@ -114,7 +120,7 @@ class LectureSetupApp(App[RunOptions]):
                 id="course",
             )
             yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
-            yield Input(placeholder="2026-09-04", id="lecture-date")
+            yield Input(value=_week_monday(), id="lecture-date")
             yield Label("Lecture title", classes="field-label")
             yield Input(placeholder="압축성 유동", id="lecture-title")
             yield Label("Public .m3u8 URL", classes="field-label")

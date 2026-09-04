@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from textual.widgets import Input, Label, Select, TextArea
 
 from lecture_util.summary import DEFAULT_PROMPT
-from lecture_util.tui import LectureSetupApp
+from lecture_util.tui import LectureSetupApp, _week_monday
 from lecture_util.vault import COURSES_DIRECTORY
 
 
@@ -20,6 +22,22 @@ def create_vault(root: Path) -> None:
 
 
 class TuiTests(unittest.IsolatedAsyncioTestCase):
+    def test_week_monday_handles_week_and_year_boundaries(self) -> None:
+        self.assertEqual(_week_monday(date(2026, 9, 7)), "2026-09-07")
+        self.assertEqual(_week_monday(date(2026, 9, 13)), "2026-09-07")
+        self.assertEqual(_week_monday(date(2026, 1, 1)), "2025-12-29")
+
+    async def test_lecture_date_defaults_to_current_week_monday(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            with patch("lecture_util.tui._week_monday", return_value="2026-08-31"):
+                async with app.run_test(size=(100, 40)):
+                    value = app.query_one("#lecture-date", Input).value
+
+        self.assertEqual(value, "2026-08-31")
+
     async def test_default_form_builds_vault_run_options(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             vault = Path(directory)
@@ -110,6 +128,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             create_vault(vault)
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one("#lecture-date", Input).value = ""
                 app.query_one("#source", Input).value = URL
                 await pilot.press("enter")
                 await pilot.pause()
