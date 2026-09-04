@@ -7,7 +7,7 @@
 - Apple Silicon에서는 `mlx-whisper`, NVIDIA Linux에서는 `faster-whisper` 사용
 - 로그인된 Codex CLI로 전사문 요약
 - 과목별 `Lecture` 또는 `Lectures` 폴더에 Obsidian Markdown 발행
-- 원본 영상과 중간 산출물은 Vault 밖의 사용자 캐시에 보관
+- 원본 영상은 설정한 영상 보관소에, 중간 산출물은 Vault 밖의 사용자 캐시에 보관
 - 완료된 단계는 재사용하고 실패한 단계부터 재개
 
 본인이 다운로드할 권한이 있는 강의에만 사용하세요. 로그인, 쿠키 또는 별도 인증이 필요한 LMS URL은 지원하지 않습니다.
@@ -76,6 +76,7 @@ uv run lecture-util doctor
 | 항목 | 최초 제안값 | 설명 |
 | --- | --- | --- |
 | Obsidian Vault path | `~/Documents/학부연구생` | 강의 노트를 발행할 Vault 루트 |
+| Video storage path | `~/Videos/lecture-util` | 과목과 주차별 MP4 영상을 보관할 루트 |
 | Semester start date | 가장 최근의 8월 31일 | 강의 주차 계산 기준일 |
 | Transcription device | `auto` | `auto`, `mlx`, `cuda`, `cpu` 중 선택 |
 | Whisper model | `large-v3` | 기본 Whisper 모델 이름 또는 경로 |
@@ -89,6 +90,8 @@ uv run lecture-util onboard
 ```
 
 온보딩은 Vault가 현재 강의 발행에 사용 가능한지 확인합니다. 따라서 아래 과목 구조를 먼저 만든 뒤 저장해야 합니다.
+
+영상 저장 폴더가 없으면 설정 저장 시 자동으로 만듭니다. Vault 내부 경로를 입력하면 영상이 Obsidian에 의해 인덱싱되거나 동기화될 수 있다는 확인 화면을 한 번 더 표시합니다.
 
 과목은 Vault의 `10 Academics/Courses` 바로 아래에 있어야 합니다. 각 과목에는 정확히 하나의 `Lecture` 또는 `Lectures` 폴더가 필요합니다.
 
@@ -303,7 +306,20 @@ Codex가 생성한 요약...
 [00:00:00.000–00:00:08.240] 첫 번째 발화 내용
 ```
 
-Vault에는 이 두 Markdown 파일만 저장합니다. MP4, WAV, JSON, SRT와 실행 상태는 Vault에 복사하지 않습니다.
+기본 설정에서는 Vault에 이 두 Markdown 파일만 저장합니다. Vault 내부 영상 경로 사용에 직접 동의하지 않는 한 MP4, WAV, JSON, SRT와 실행 상태는 Vault에 복사하지 않습니다.
+
+### 영상 보관소
+
+MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차와 강의 제목으로 저장합니다. 강의일 자체는 파일명에 넣지 않습니다.
+
+```text
+~/Videos/lecture-util/
+└── 공기역학특론/
+    └── 2주차/
+        └── 압축성 유동.mp4
+```
+
+같은 URL에 대해 다운로드가 완료된 상태이고 해당 영상이 있으면 재사용합니다. 완료 기록이 없는 같은 경로의 파일은 실수로 덮어쓰지 않으며, 명시적으로 `--force`를 지정해야 교체합니다.
 
 ### 사용자 캐시
 
@@ -311,7 +327,6 @@ Vault에는 이 두 Markdown 파일만 저장합니다. MP4, WAV, JSON, SRT와 �
 
 ```text
 ~/.cache/lecture-util/lecture-<URL 해시>/
-├── source.mp4
 ├── audio.wav
 ├── transcript.json
 ├── transcript.md
@@ -320,16 +335,28 @@ Vault에는 이 두 Markdown 파일만 저장합니다. MP4, WAV, JSON, SRT와 �
 └── run.json
 ```
 
-`run.json`에는 원본 URL, 과목, 날짜, 제목, Vault 발행 경로, 태그와 각 처리 단계의 상태가 기록됩니다. 캐시는 자동 삭제하지 않습니다.
+`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그와 각 처리 단계의 상태가 기록됩니다. 캐시와 영상은 자동 삭제하지 않습니다.
+
+### 기존 설정과 영상 옮기기
+
+영상 경로가 없는 설정 v1은 새 실행에 사용할 수 없습니다. 먼저 `lecture-util onboard`를 실행해 기존 Vault, 학기 및 모델 설정을 불러온 뒤 영상 경로를 저장합니다. 기존 영상은 자동으로 이동하지 않습니다.
+
+기존 `~/.cache/lecture-util/lecture-<URL 해시>/source.mp4`를 계속 재사용하려면 직접 다음 위치로 옮깁니다.
+
+```text
+<설정한 영상 경로>/<과목>/<N주차>/<제목>.mp4
+```
+
+`N주차`는 온보딩의 학기 시작일과 강의일을 기준으로 계산합니다. 기존 `run.json`의 `course`, `lecture_date`, `title` 값을 참고할 수 있습니다.
 
 ## 캐시 재사용과 실패 복구
 
 같은 URL을 다시 처리하면 URL 해시가 같으므로 기존 작업공간을 사용합니다.
 
-- 다운로드와 오디오 파일이 정상적으로 완료되어 있으면 다시 만들지 않습니다.
+- 같은 과목·주차·제목 위치에 다운로드된 영상과 오디오가 정상적으로 완료되어 있으면 다시 만들지 않습니다.
 - Whisper 모델, 언어와 장치가 이전 실행과 같으면 기존 전사문을 재사용합니다.
 - 전사 내용, Codex 모델과 요약 프롬프트가 같으면 기존 요약을 재사용합니다.
-- 제목, 날짜 또는 과목만 바꾼 경우에도 같은 URL의 미디어와 전사 캐시를 재사용합니다.
+- 같은 URL이면 오디오와 전사 캐시는 유지되지만, 과목·주차·제목이 바뀌어 새 영상 경로가 되면 그 위치에는 영상을 다시 다운로드합니다.
 - 실패한 단계는 `run.json`에 실패 상태와 메시지를 기록하며 다음 실행에서 다시 시도합니다.
 
 캐시를 재사용한 단계는 진행 화면에서 `↻`로 표시됩니다.
@@ -350,14 +377,23 @@ Vault에는 이 두 Markdown 파일만 저장합니다. MP4, WAV, JSON, SRT와 �
 ### 다운로드와 오디오 추출
 
 ```bash
-uv run lecture-util download URL
+uv run lecture-util download URL \
+  --course '공기역학특론' \
+  --title '압축성 유동'
 ```
 
-기본 작업 루트는 `~/.cache/lecture-util`입니다. 다른 위치를 사용하려면 `--output-dir`을 지정합니다.
-다운로드를 중단하거나 다운로드가 실패하면 불완전한 임시 동영상은 캐시에서 자동으로 삭제됩니다.
+영상 경로와 학기 시작일은 온보딩 설정을 사용합니다. `--date`를 생략하면 명령을 실행한 날짜로 주차를 계산하며 다른 강의일을 사용하려면 `--date YYYY-MM-DD`를 지정합니다.
+
+기본 캐시 작업 루트는 `~/.cache/lecture-util`입니다. `--output-dir`은 영상 보관소가 아니라 오디오, 전사 및 실행 상태 캐시의 위치를 변경합니다.
+다운로드를 중단하거나 다운로드가 실패하면 영상 대상 폴더의 불완전한 임시 파일을 자동으로 삭제합니다.
 
 ```bash
-uv run lecture-util download URL --output-dir /tmp/lecture-cache --force
+uv run lecture-util download URL \
+  --course '공기역학특론' \
+  --date 2026-09-04 \
+  --title '압축성 유동' \
+  --output-dir /tmp/lecture-cache \
+  --force
 ```
 
 명령이 출력한 `Prepared` 경로가 이후 단계의 `LECTURE_DIR`입니다.
