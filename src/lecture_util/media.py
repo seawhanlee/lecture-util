@@ -55,23 +55,27 @@ def download_hls(url: str, destination: Path) -> None:
     temporary = destination.with_name(f".{destination.stem}.download{destination.suffix}")
     if temporary.exists():
         temporary.unlink()
-    run_command(
-        [
-            yt_dlp,
-            "--no-playlist",
-            "--no-part",
-            "--merge-output-format",
-            "mp4",
-            "--ffmpeg-location",
-            ffmpeg,
-            "--output",
-            str(temporary),
-            url,
-        ]
-    )
-    if not temporary.exists():
-        raise CommandError("yt-dlp completed without creating the expected video file.")
-    temporary.replace(destination)
+    try:
+        run_command(
+            [
+                yt_dlp,
+                "--no-playlist",
+                "--no-part",
+                "--merge-output-format",
+                "mp4",
+                "--ffmpeg-location",
+                ffmpeg,
+                "--output",
+                str(temporary),
+                url,
+            ]
+        )
+        if not temporary.exists():
+            raise CommandError("yt-dlp completed without creating the expected video file.")
+        temporary.replace(destination)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def extract_audio(video: Path, destination: Path) -> None:

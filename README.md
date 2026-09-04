@@ -327,6 +327,7 @@ uv run lecture-util download URL
 ```
 
 기본 작업 루트는 `~/.cache/lecture-util`입니다. 다른 위치를 사용하려면 `--output-dir`을 지정합니다.
+다운로드를 중단하거나 다운로드가 실패하면 불완전한 임시 동영상은 캐시에서 자동으로 삭제됩니다.
 
 ```bash
 uv run lecture-util download URL --output-dir /tmp/lecture-cache --force
