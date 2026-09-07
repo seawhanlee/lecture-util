@@ -7,6 +7,8 @@ import sys
 from time import monotonic
 
 import typer
+import click
+from typer.core import TyperGroup
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -24,6 +26,7 @@ from lecture_util.configuration import (
 from lecture_util.console_progress import ConsoleProgressReporter
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
+from lecture_util.interactive import prompt_lecture
 from lecture_util.media import validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
@@ -49,7 +52,17 @@ from lecture_util.vault import (
 )
 
 
+class LectureCommandGroup(TyperGroup):
+    def resolve_command(
+        self, ctx: click.Context, args: list[str],
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        if args and args[0].lower().startswith(("https://", "http://")):
+            return "interactive", self.get_command(ctx, "interactive"), args
+        return super().resolve_command(ctx, args)
+
+
 app = typer.Typer(
+    cls=LectureCommandGroup,
     invoke_without_command=True,
     no_args_is_help=False,
     pretty_exceptions_show_locals=False,
@@ -149,7 +162,10 @@ def _interactive_terminal() -> bool:
 
 @app.callback()
 def root_callback(ctx: typer.Context) -> None:
-    """Download, transcribe, and summarize LMS lectures."""
+    """Download, transcribe, and summarize LMS lectures.
+
+    Pass a public .m3u8 URL directly to choose a course and week interactively.
+    """
     if ctx.invoked_subcommand is not None:
         return
     if not _interactive_terminal():
@@ -177,6 +193,39 @@ def root_callback(ctx: typer.Context) -> None:
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
+
+
+@app.command("interactive", hidden=True)
+def interactive_command(url: str = typer.Argument(..., help="Public .m3u8 URL")) -> None:
+    """Choose lecture metadata with Rich prompts for a supplied URL."""
+    try:
+        validate_hls_url(url)
+    except LectureUtilError as error:
+        console.print(Text(str(error), style="red"))
+        raise typer.Exit(2) from error
+    if not _interactive_terminal():
+        console.print("A URL alone requires an interactive terminal. Use 'lecture-util run --help'.")
+        raise typer.Exit(2)
+
+    def action() -> None:
+        try:
+            config = load_config()
+            if config is None:
+                config = run_onboarding(default_app_config())
+                if config is None:
+                    console.print("Cancelled before setup.")
+                    return
+                config = save_config(config)
+            options = prompt_lecture(url, config, console)
+        except (KeyboardInterrupt, EOFError):
+            console.print("Cancelled before processing.")
+            return
+        if options is None:
+            console.print("Cancelled before processing.")
+            return
+        _execute_run(options, vault_root=config.vault_root, video_root=config.video_root)
+
+    _run_or_exit(action)
 
 
 @app.command("run")
