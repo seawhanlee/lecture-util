@@ -11,7 +11,7 @@ from textual.widget import Widget
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Checkbox, Collapsible, Input, Label, OptionList, Select, TextArea
 
-from lecture_util.codex_models import discover_models
+from lecture_util.codex_models import ModelCatalog, discover_models
 from lecture_util.errors import LectureUtilError
 
 T = TypeVar("T")
@@ -23,9 +23,12 @@ class CodexModelPicker(Vertical):
 
     DEFAULT_CSS = "CodexModelPicker { height: auto; }"
 
-    def __init__(self, model: str | None) -> None:
+    def __init__(self, model: str | None, effort: str | None = None) -> None:
         super().__init__()
         self.initial_model = model or ""
+        self.initial_effort = effort or ""
+        self.catalog = ModelCatalog((), "")
+        self._effort_model = self.initial_model
 
     def compose(self) -> ComposeResult:
         yield Label("Codex model", classes="field-label")
@@ -34,13 +37,21 @@ class CodexModelPicker(Vertical):
             options.append((self.initial_model, self.initial_model))
         yield Select(options, value=self.initial_model, allow_blank=False, id="llm-model")
         yield Label("Loading Codex models…", id="model-status", markup=False)
+        yield Label("Thinking effort", classes="field-label")
+        options = [("Use Codex configured default", "")]
+        if self.initial_effort:
+            options.append((self.initial_effort, self.initial_effort))
+        yield Select(options, value=self.initial_effort,
+                     allow_blank=False, id="reasoning-effort")
+        yield Label("Loading supported efforts…", id="effort-status", markup=False)
 
     def on_mount(self) -> None:
         self.run_worker(self._load_models(), exclusive=True)
 
     async def _load_models(self) -> None:
         catalog = await discover_models()
-        select = self.query_one(Select)
+        self.catalog = catalog
+        select = self.query_one("#llm-model", Select)
         selected = select.value
         options = [("Use Codex configured default", ""), *catalog.models]
         known = {value for _, value in options}
@@ -51,6 +62,36 @@ class CodexModelPicker(Vertical):
         select.set_options(options)
         select.value = selected
         self.query_one("#model-status", Label).update(catalog.status)
+        self._update_efforts()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "llm-model" and self.is_mounted:
+            # set_options queues intermediate values; always read the final selection.
+            self._update_efforts()
+
+    def _update_efforts(self) -> None:
+        model = self.query_one("#llm-model", Select).value
+        select = self.query_one("#reasoning-effort", Select)
+        selected = select.value
+        levels = self.catalog.efforts.get(model) if isinstance(model, str) else None
+        known = levels is not None
+        options = [("Use Codex configured default", "")]
+        options.extend((level, level) for level in (
+            levels if known else ("minimal", "low", "medium", "high", "xhigh")
+        ))
+        status = ("Supported efforts for the selected model." if known else
+                  "Support unverified; choose a listed model to check supported efforts.")
+        if selected and selected not in {value for _, value in options}:
+            if known and model != self._effort_model:
+                selected = ""
+                status = "Previous effort is unsupported; using Codex configured default."
+            elif isinstance(selected, str):
+                options.append((f"{selected} (unverified selection)", selected))
+                status = "Saved effort is unverified for this model; choose a supported effort."
+        self._effort_model = model
+        select.set_options(options)
+        select.value = selected
+        self.query_one("#effort-status", Label).update(status)
 
 
 class FormApp(App[T]):
@@ -133,6 +174,19 @@ class FormApp(App[T]):
     def selected_model(self) -> str | None:
         value = self.query_one("#llm-model", Select).value
         return value if isinstance(value, str) and value else None
+
+    def selected_effort(self) -> str | None:
+        value = self.query_one("#reasoning-effort", Select).value
+        return value if isinstance(value, str) and value else None
+
+    def validated_effort(self) -> str | None:
+        effort = self.selected_effort()
+        model = self.selected_model()
+        levels = self.query_one(CodexModelPicker).catalog.efforts.get(model)
+        if effort is not None and levels is not None and effort not in levels:
+            self.error_field = "reasoning-effort"
+            raise LectureUtilError("Choose a supported thinking effort or Codex default.")
+        return effort
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._changed(event.input)

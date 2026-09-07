@@ -22,13 +22,17 @@ class ModelPickerTests(unittest.IsolatedAsyncioTestCase):
                 config = AppConfig(
                     vault_root=root, video_root=root / "../videos",
                     semester_start="2026-08-31", llm_model="old-model",
+                    reasoning_effort="high",
                 )
                 app = form(config) if form is OnboardingApp else form(config=config)
                 ready = asyncio.Event()
 
                 async def lookup():
                     await ready.wait()
-                    return ModelCatalog((("New model", "new-model"),), "Using cached models.")
+                    return ModelCatalog(
+                        (("New model", "new-model"),), "Using cached models.",
+                        {"new-model": ("low", "medium")},
+                    )
 
                 with patch("lecture_util.form_ui.discover_models", lookup):
                     async with app.run_test(size=(120, 40)) as pilot:
@@ -36,11 +40,14 @@ class ModelPickerTests(unittest.IsolatedAsyncioTestCase):
                             section.collapsed = False
                         select = app.query_one("#llm-model", Select)
                         self.assertEqual(select.value, "old-model")
+                        effort = app.query_one("#reasoning-effort", Select)
+                        self.assertEqual(effort.value, "high")
                         select.value = ""
                         ready.set()
                         await app.workers.wait_for_complete()
                         await pilot.pause()
                         self.assertEqual(select.value, "")
+                        self.assertEqual(effort.value, "high")
                         self.assertIn("cached", str(app.query_one("#model-status", Label).render()))
                         select.value = "old-model"
                         await pilot.pause()
@@ -49,6 +56,10 @@ class ModelPickerTests(unittest.IsolatedAsyncioTestCase):
                         select.focus()
                         await pilot.press("enter", "down", "enter")
                         self.assertEqual(select.value, "new-model")
+                        self.assertEqual(effort.value, "")
+                        effort.focus()
+                        await pilot.press("enter", "down", "enter")
+                        self.assertEqual(effort.value, "low")
                         self.assertFalse(select.expanded)
                         await pilot.pause()
                         self.assertIn("new-model", str(app.query_one("#preview-content", Label).render()))
@@ -60,6 +71,12 @@ class ModelPickerTests(unittest.IsolatedAsyncioTestCase):
                         else:
                             build = app._build_config
                         self.assertEqual(build().llm_model, "new-model")
+                        self.assertEqual(build().reasoning_effort, "low")
+                        self.assertIn("Thinking effort: low", str(
+                            app.query_one("#preview-content", Label).render(),
+                        ))
+                        effort.value = ""
+                        self.assertIsNone(build().reasoning_effort)
                         select.value = ""
                         self.assertIsNone(build().llm_model)
                         self.assertEqual(config.llm_model, "old-model")

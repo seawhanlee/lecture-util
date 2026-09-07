@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from lecture_util.codex_models import _query_models, discover_models
+from lecture_util.codex_models import ModelCatalog, _catalog, _query_models, discover_models
 
 
 class QueryTests(unittest.IsolatedAsyncioTestCase):
@@ -32,7 +32,7 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
             ], "nextCursor": None}},
         ])
         with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-            self.assertEqual(await _query_models(), (("One", "one"), ("two", "two")))
+            self.assertEqual((await _query_models()).models, (("One", "one"), ("two", "two")))
         sent = [json.loads(call.args[0]) for call in process.stdin.write.call_args_list]
         self.assertEqual(sent[1]["method"], "initialized")
         self.assertEqual(sent[-1]["params"]["cursor"], "next")
@@ -71,7 +71,9 @@ class QueryTests(unittest.IsolatedAsyncioTestCase):
 
 
 def test_live_models_do_not_read_cache(monkeypatch):
-    monkeypatch.setattr("lecture_util.codex_models._query_models", AsyncMock(return_value=(("One", "one"),)))
+    monkeypatch.setattr("lecture_util.codex_models._query_models", AsyncMock(
+        return_value=ModelCatalog((("One", "one"),), "Loaded"),
+    ))
     with patch("pathlib.Path.read_text", side_effect=AssertionError("cache read")):
         assert asyncio.run(discover_models()).models == (("One", "one"),)
 
@@ -96,3 +98,17 @@ def test_missing_or_invalid_cache_is_nonfatal(tmp_path, monkeypatch, contents):
         (tmp_path / "models_cache.json").write_text(contents)
     monkeypatch.setattr("lecture_util.codex_models._query_models", AsyncMock(side_effect=FileNotFoundError()))
     assert asyncio.run(discover_models()).models == ()
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_catalog_reads_model_specific_efforts(cached):
+    entry = ({
+        "slug": "one", "visibility": "list",
+        "supported_reasoning_levels": [{"effort": "low"}, {"effort": "ultra"}],
+    } if cached else {
+        "model": "one", "supportedReasoningEfforts": [
+            {"reasoningEffort": "low"}, {"reasoningEffort": "ultra"},
+        ],
+    })
+    catalog = _catalog([entry], "Loaded", cached=cached)
+    assert catalog.efforts == {"one": ("low", "ultra")}

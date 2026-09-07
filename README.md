@@ -82,6 +82,7 @@ uv run lecture-util doctor
 | Whisper model | `large-v3` | 기본 Whisper 모델 이름 또는 경로 |
 | Lecture language | `auto` | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
 | Codex model | Codex 기본 설정 사용 | 설치된 Codex에서 조회한 모델을 드롭다운으로 선택 |
+| Thinking effort | Codex 기본 설정 사용 | 선택 모델의 추론 강도를 드롭다운으로 선택 |
 
 설정은 `$XDG_CONFIG_HOME/lecture-util/config.json`에 저장됩니다. `XDG_CONFIG_HOME`이 없으면 `~/.config/lecture-util/config.json`을 사용합니다. 설정을 바꾸려면 대화형 터미널에서 다음 명령을 실행합니다.
 
@@ -153,6 +154,7 @@ uv run lecture-util
 | Whisper model | 온보딩 설정값 | Whisper 모델 이름 또는 지원되는 모델 경로 |
 | Lecture language | 온보딩 설정값 | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
 | Codex model | 온보딩 설정값 | 드롭다운에서 이번 강의에 사용할 모델 선택 |
+| Thinking effort | 온보딩 설정값 | 이번 강의에 사용할 추론 강도 선택 |
 | Summary prompt | 기본 프롬프트 | 직접 입력하거나 Markdown/text 파일에서 읽기 |
 
 폭 100칸 이상에서는 입력 폼 오른쪽에 강의 정보·저장 경로·처리 설정 요약을 표시합니다. 좁은 터미널에서는 요약이 폼 아래로 이동하며, 하단 실행 버튼은 스크롤과 관계없이 표시됩니다. 초기 설정 화면도 같은 배치를 사용합니다.
@@ -235,6 +237,10 @@ uv run lecture-util run URL \
 `--language auto`는 언어를 자동 감지합니다. `large-v3` 실행 중 실제 메모리 부족 오류가 발생하면 메모리를 정리한 뒤 `turbo` 모델로 한 번 재시도하며, 요청 모델과 실제 모델 및 전환 이유를 `run.json`과 `transcript.json`에 남깁니다.
 
 ### Codex 모델과 요약 지시 지정
+
+`config`, `onboard`와 강의 실행 화면에서 `Thinking effort`를 선택할 수 있습니다. 선택한 모델의 지원 목록을 Codex 또는 로컬 캐시에서 읽어 표시합니다. 모델 변경 시 지원되지 않는 effort는 기본값으로 전환하며 안내를 표시합니다. 모델을 지정하지 않거나 지원 정보를 조회할 수 없으면 일반적인 effort 옵션과 지원 여부 미확인 안내를 표시합니다. `Use Codex configured default`는 effort를 별도로 지정하지 않습니다.
+
+`run`과 `summarize`에서는 `--reasoning-effort high`처럼 지정할 수도 있습니다. `run`은 저장된 effort를 기본값으로 사용하고 `--reasoning-effort ''`로 Codex 기본 설정을 사용할 수 있습니다. `summarize`는 기존 모델 옵션과 마찬가지로 생략 시 Codex 기본 설정을 사용합니다. effort가 달라지면 요약 캐시를 다시 생성합니다.
 
 온보딩과 강의 실행 화면에서 Codex 모델을 드롭다운으로 선택할 수 있습니다. `Use Codex configured default`는 Codex 자체 기본 설정을 사용합니다. 모델 목록은 화면을 연 뒤 자동으로 조회하며, 조회 실패 시 로컬 Codex 캐시를 사용하고 상태를 표시합니다. 캐시도 없으면 기본 설정과 기존 저장 모델을 선택할 수 있습니다. 온보딩에서 저장한 모델은 다음 실행의 기본값이고, 강의 실행 화면의 변경은 해당 실행에만 적용됩니다.
 

@@ -123,7 +123,7 @@ class OnboardingApp(FormApp[AppConfig]):
         yield Input(value=self.initial.whisper_model, id="whisper-model")
         yield Label("Lecture language", classes="field-label")
         yield Input(value=self.initial.language, id="language")
-        yield CodexModelPicker(self.initial.llm_model)
+        yield CodexModelPicker(self.initial.llm_model, self.initial.reasoning_effort)
 
     def on_mount(self) -> None:
         super().on_mount()
@@ -147,6 +147,7 @@ class OnboardingApp(FormApp[AppConfig]):
             f"\n\nTRANSCRIPTION\n{device} · {self.value('whisper-model') or 'Choose a model'}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}"
             f"\n\nSUMMARY\n{self.selected_model() or 'Codex default'}"
+            f"\nThinking effort: {self.selected_effort() or 'Codex default'}"
         )
 
     def _submit(self) -> None:
@@ -197,6 +198,7 @@ class OnboardingApp(FormApp[AppConfig]):
                 language=self.query_one("#language", Input).value,
                 device=device,
                 llm_model=self.selected_model(),
+                reasoning_effort=self.validated_effort(),
             ),
             allow_unconfirmed_video_root=True,
         )

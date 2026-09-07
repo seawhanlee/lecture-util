@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lecture_util.errors import LectureUtilError
@@ -14,6 +14,29 @@ from lecture_util.errors import LectureUtilError
 class ModelCatalog:
     models: tuple[tuple[str, str], ...]
     status: str
+    efforts: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+def _catalog(entries: object, status: str, *, cached: bool = False) -> ModelCatalog:
+    models = _choices(entries, cached=cached)
+    visible = {model for _, model in models}
+    efforts: dict[str, tuple[str, ...]] = {}
+    assert isinstance(entries, list)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        model = entry.get("slug" if cached else "model")
+        if not isinstance(model, str) or model not in visible or model in efforts:
+            continue
+        levels = entry.get("supported_reasoning_levels" if cached
+                           else "supportedReasoningEfforts")
+        if isinstance(levels, list):
+            values = [level.get("effort" if cached else "reasoningEffort")
+                      for level in levels if isinstance(level, dict)]
+            efforts[model] = tuple(dict.fromkeys(
+                value for value in values if isinstance(value, str) and value
+            ))
+    return ModelCatalog(models, status, efforts)
 
 
 def _choices(entries: object, *, cached: bool = False) -> tuple[tuple[str, str], ...]:
@@ -32,7 +55,7 @@ def _choices(entries: object, *, cached: bool = False) -> tuple[tuple[str, str],
     return tuple((label, model) for model, label in choices.items())
 
 
-async def _query_models() -> tuple[tuple[str, str], ...]:
+async def _query_models() -> ModelCatalog:
     process = await asyncio.create_subprocess_exec(
         "codex", "app-server", stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
@@ -74,7 +97,7 @@ async def _query_models() -> tuple[tuple[str, str], ...]:
             entries.extend(page)
             cursor = result.get("nextCursor")
             if cursor is None:
-                return _choices(entries)
+                return _catalog(entries, "Models loaded from Codex.")
             if not isinstance(cursor, str) or cursor in seen:
                 raise ValueError("Invalid model cursor")
             seen.add(cursor)
@@ -95,17 +118,20 @@ async def _query_models() -> tuple[tuple[str, str], ...]:
 async def discover_models() -> ModelCatalog:
     try:
         async with asyncio.timeout(10):
-            models = await _query_models()
-        if models:
-            return ModelCatalog(models, "Models loaded from Codex.")
+            catalog = await _query_models()
+        if catalog.models:
+            return catalog
     except (OSError, ValueError, LectureUtilError, TimeoutError):
         pass
     codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
     try:
         data = json.loads((codex_home / "models_cache.json").read_text(encoding="utf-8"))
-        models = _choices(data.get("models") if isinstance(data, dict) else None, cached=True)
-        if models:
-            return ModelCatalog(models, "Using cached Codex models; live lookup unavailable.")
+        catalog = _catalog(
+            data.get("models") if isinstance(data, dict) else None,
+            "Using cached Codex models; live lookup unavailable.", cached=True,
+        )
+        if catalog.models:
+            return catalog
     except (OSError, ValueError):
         pass
     return ModelCatalog((), "Models unavailable. Use Codex default or the saved model.")

@@ -96,7 +96,9 @@ def _execute_run(
         semester_start=semester_start,
     )
 
-    summarizer = CodexSummarizer(model=options.llm_model)
+    summarizer = CodexSummarizer(
+        model=options.llm_model, reasoning_effort=options.reasoning_effort,
+    )
     started = monotonic()
     with ConsoleProgressReporter(
         ("download", "audio", "transcription", "summary"), console=console,
@@ -189,6 +191,10 @@ def run_command(
         help="Override the configured Codex model; pass an empty value for its default",
     ),
     tag: list[str] | None = typer.Option(None, "--tag"),
+    reasoning_effort: str | None = typer.Option(
+        None, "--reasoning-effort",
+        help="Override thinking effort; pass an empty value for the Codex default",
+    ),
     whisper_model: str | None = typer.Option(
         None,
         "--whisper-model",
@@ -228,6 +234,8 @@ def run_command(
                 semester_start=semester_start or config.semester_start,
                 title=title,
                 llm_model=selected_llm_model,
+                reasoning_effort=(config.reasoning_effort if reasoning_effort is None
+                                  else reasoning_effort.strip() or None),
                 tags=normalize_tags(tag),
                 whisper_model=whisper_model or config.whisper_model,
                 language=language or config.language,
@@ -366,6 +374,7 @@ def transcribe_command(
 def summarize_command(
     lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False),
     llm_model: str | None = typer.Option(None, "--llm-model"),
+    reasoning_effort: str | None = typer.Option(None, "--reasoning-effort"),
     prompt: str | None = typer.Option(None, "--prompt"),
     prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
     force: bool = typer.Option(False, "--force"),
@@ -375,7 +384,9 @@ def summarize_command(
     def action() -> None:
         paths = LecturePaths(lecture_dir)
         state = RunState(paths)
-        summarizer = CodexSummarizer(model=llm_model)
+        summarizer = CodexSummarizer(
+            model=llm_model, reasoning_effort=(reasoning_effort or "").strip() or None,
+        )
         with ConsoleProgressReporter(("summary",), console=console) as progress:
             summary_stage(
                 load_transcript(paths.transcript_json),

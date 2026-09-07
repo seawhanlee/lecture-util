@@ -25,6 +25,7 @@ class FakeSummarizer:
     prompts: list[str] = field(default_factory=list)
     developer_prompts: list[str] = field(default_factory=list)
     transcript_paths: list[Path] = field(default_factory=list)
+    reasoning_effort: str | None = None
 
     def generate(
         self,
@@ -53,6 +54,20 @@ def sample_transcript(segment_count: int = 8) -> Transcript:
 
 
 class SummaryTests(unittest.TestCase):
+    def test_effort_change_regenerates_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths, state = create_workspace(
+                "https://example.com/index.m3u8", Path(directory),
+            )
+            paths.transcript_markdown.write_text("Transcript", encoding="utf-8")
+            for effort, expected_calls in [("low", 1), ("low", 0), ("high", 1)]:
+                summarizer = FakeSummarizer(reasoning_effort=effort)
+                summary_stage(
+                    sample_transcript(), paths.transcript_markdown,
+                    paths.summary, state, summarizer,
+                )
+                self.assertEqual(len(summarizer.prompts), expected_calls)
+
     def test_summary_reads_one_transcript_file_in_one_codex_instance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             summarizer = FakeSummarizer()

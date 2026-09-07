@@ -49,6 +49,7 @@ def configured_defaults(
         language="ko",
         device="cuda",
         llm_model="gpt-test",
+        reasoning_effort="high",
     )
 
 
@@ -100,6 +101,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(selected.language, "ko")
         self.assertEqual(selected.device, "cuda")
         self.assertEqual(selected.llm_model, "gpt-test")
+        self.assertEqual(selected.reasoning_effort, "high")
         self.assertEqual(execute.call_args.kwargs["vault_root"], config.vault_root)
         self.assertEqual(execute.call_args.kwargs["video_root"], config.video_root)
 
@@ -153,6 +155,8 @@ class CliTests(unittest.TestCase):
                     "cpu",
                     "--llm-model",
                     "",
+                    "--reasoning-effort",
+                    "",
                 ],
             )
 
@@ -162,6 +166,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(selected.language, "en")
         self.assertEqual(selected.device, "cpu")
         self.assertIsNone(selected.llm_model)
+        self.assertIsNone(selected.reasoning_effort)
 
     def test_run_without_config_explains_how_to_onboard(self) -> None:
         with (
@@ -308,14 +313,16 @@ class CliTests(unittest.TestCase):
                 patch("lecture_util.cli.run_lecture", return_value=cached) as run_lecture,
                 patch("lecture_util.cli.ConsoleProgressReporter") as reporter,
             ):
+                selected = options()
+                selected.reasoning_effort = "high"
                 _execute_run(
-                    options(),
+                    selected,
                     vault_root=vault,
                     video_root=root / "videos",
                     cache_root=cache,
                 )
 
-            factory.assert_called_once_with(model=None)
+            factory.assert_called_once_with(model=None, reasoning_effort="high")
             self.assertEqual(
                 reporter.call_args.kwargs["lecture_label"],
                 f"{COURSE} · 2026-09-04 압축성 유동",

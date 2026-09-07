@@ -28,7 +28,7 @@ class SummarizerTests(unittest.TestCase):
                 patch("lecture_util.summarizers._require_cli", return_value="/bin/codex"),
                 patch("lecture_util.summarizers.subprocess.run", side_effect=fake_run) as run,
             ):
-                result = CodexSummarizer(model="test-model").generate(
+                result = CodexSummarizer(model="test-model", reasoning_effort="high").generate(
                     "developer instructions",
                     "summarize this lecture",
                     transcript_path,
@@ -38,6 +38,7 @@ class SummarizerTests(unittest.TestCase):
         prompt = run.call_args.kwargs["input"]
         self.assertEqual(result, "# Summary")
         self.assertEqual(argv[argv.index("--model") + 1], "test-model")
+        self.assertEqual(argv[argv.index("--config") + 1], 'model_reasoning_effort="high"')
         self.assertEqual(argv[argv.index("--cd") + 1], str(transcript_path.parent.resolve()))
         self.assertIn("`transcript.md`", prompt)
         self.assertNotIn("secret transcript body", prompt)
@@ -58,6 +59,7 @@ class SummarizerTests(unittest.TestCase):
             ):
                 CodexSummarizer().generate("Instructions", "Summarize", transcript)
             self.assertNotIn("--model", run.call_args.args[0])
+            self.assertNotIn("--config", run.call_args.args[0])
 
     def test_agent_prompt_allows_reading_but_forbids_file_changes(self) -> None:
         prompt = _agent_prompt("developer", "summarize", "transcript.md")

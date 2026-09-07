@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -48,6 +49,7 @@ def _agent_prompt(developer_prompt: str, user_prompt: str, transcript_name: str)
 class CodexSummarizer:
     model: str | None = None
     name: str = "codex"
+    reasoning_effort: str | None = None
 
     def generate(
         self,
@@ -77,6 +79,11 @@ class CodexSummarizer:
             ]
             if self.model:
                 argv.extend(["--model", self.model])
+            if self.reasoning_effort:
+                argv.extend([
+                    "--config",
+                    f"model_reasoning_effort={json.dumps(self.reasoning_effort)}",
+                ])
             argv.append("-")
             result = subprocess.run(
                 argv,

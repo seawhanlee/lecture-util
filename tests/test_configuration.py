@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,6 +40,22 @@ def config_for(vault: Path, video_root: Path | None = None) -> AppConfig:
 def test_default_config_path_honors_xdg_config_home(tmp_path: Path) -> None:
     with patch.dict("os.environ", {"XDG_CONFIG_HOME": str(tmp_path)}):
         assert default_config_path() == tmp_path / "lecture-util" / "config.json"
+
+
+def test_effort_roundtrip_and_old_config_compatibility(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    create_vault(vault)
+    path = tmp_path / "config.json"
+    save_config(replace(config_for(vault), reasoning_effort=" high "), path)
+    assert load_config(path).reasoning_effort == "high"
+    data = json.loads(path.read_text())
+    del data["reasoning_effort"]
+    path.write_text(json.dumps(data))
+    assert load_config(path).reasoning_effort is None
+    data["reasoning_effort"] = 42
+    path.write_text(json.dumps(data))
+    with pytest.raises(LectureUtilError, match="Thinking effort"):
+        load_config(path)
 
 
 def test_config_round_trip_normalizes_and_preserves_values(tmp_path: Path) -> None:

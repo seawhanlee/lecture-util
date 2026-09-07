@@ -59,6 +59,9 @@ def summary_fingerprint(
         "developer_prompt": DEVELOPER_PROMPT,
         "prompt": prompt,
     }
+    effort = getattr(summarizer, "reasoning_effort", None)
+    if effort is not None:
+        payload["reasoning_effort"] = effort
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
 

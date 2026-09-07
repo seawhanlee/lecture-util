@@ -68,6 +68,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             language=defaults.language,
             device=defaults.device,
             llm_model=defaults.llm_model,
+            reasoning_effort=defaults.reasoning_effort,
         )
         self.vault_root = self.config.vault_root
         self.courses = discover_courses(self.vault_root)
@@ -116,7 +117,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             yield Label("Lecture language", classes="field-label")
             yield Input(value=self.config.language, id="language")
         with Collapsible(title="Summary", collapsed=True):
-            yield CodexModelPicker(self.config.llm_model)
+            yield CodexModelPicker(self.config.llm_model, self.config.reasoning_effort)
             yield Label("Summary prompt", classes="field-label")
             yield Select(
                 (
@@ -189,7 +190,9 @@ class LectureSetupApp(FormApp[RunOptions]):
             f"NOTE DESTINATION\n{destination}\n\n"
             f"TRANSCRIPTION\n{self._select_value('#device')} · {whisper_model}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}\n\n"
-            f"SUMMARY\n{self.selected_model() or 'Codex default'}\n{prompt}\n\n{rerun}"
+            f"SUMMARY\n{self.selected_model() or 'Codex default'}"
+            f"\nThinking effort: {self.selected_effort() or 'Codex default'}"
+            f"\n{prompt}\n\n{rerun}"
         )
 
     def _submit(self) -> None:
@@ -265,6 +268,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             semester_start=semester_start,
             title=title,
             llm_model=llm_model,
+            reasoning_effort=self.validated_effort(),
             tags=normalize_tags([raw_tags] if raw_tags else None),
             whisper_model=whisper_model,
             language=language,

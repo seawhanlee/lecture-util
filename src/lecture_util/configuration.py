@@ -33,6 +33,7 @@ class AppConfig:
     device: str = "auto"
     llm_model: str | None = None
     video_in_vault_allowed: bool = False
+    reasoning_effort: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -46,6 +47,14 @@ def default_config_path() -> Path:
     config_home = os.environ.get("XDG_CONFIG_HOME")
     root = Path(config_home).expanduser() if config_home else Path.home() / ".config"
     return root / "lecture-util" / "config.json"
+
+
+def normalize_reasoning_effort(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise LectureUtilError("Thinking effort must be a string or null.")
+    return value.strip() or None
 
 
 def default_app_config(reference: date | None = None) -> AppConfig:
@@ -124,6 +133,7 @@ def validate_app_config(
         language=language,
         device=config.device,
         llm_model=llm_model,
+        reasoning_effort=normalize_reasoning_effort(config.reasoning_effort),
         video_in_vault_allowed=(
             config.video_in_vault_allowed if video_in_vault else False
         ),
@@ -175,6 +185,7 @@ def app_config_from_dict(
             language=language,
             device=device,
             llm_model=llm_model_value,
+            reasoning_effort=normalize_reasoning_effort(data.get("reasoning_effort")),
             video_in_vault_allowed=video_in_vault_allowed,
         ),
         validate_vault=validate_vault,

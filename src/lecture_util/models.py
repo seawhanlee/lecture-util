@@ -82,3 +82,4 @@ class RunOptions:
     prompt: str
     force: bool
     semester_start: str | None = None
+    reasoning_effort: str | None = None
