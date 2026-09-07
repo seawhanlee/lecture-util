@@ -161,6 +161,8 @@ uv run lecture-util
 
 검사를 통과하면 TUI가 닫히고 고정 진행판이 다운로드·오디오 추출·전사·요약 상태, 경과 시간과 최근 메시지를 갱신합니다. 캐시 사용은 `Cached`로 표시하며 경고는 유지됩니다. 완료 후에는 결과 경로와 소요 시간이 남습니다. `run`, `download`, `transcribe`, `summarize` 명령도 동일한 진행 표시를 사용합니다.
 
+전사 중 모델 파일을 준비할 때는 Hugging Face의 별도 다운로드 진행 막대를 억제해 Rich 진행판과 겹치지 않게 합니다. 경고와 오류는 그대로 표시합니다. `HF_HUB_DISABLE_PROGRESS_BARS=0`을 명시한 환경에서는 해당 설정이 우선하므로, 진행 막대가 다시 나타나면 변수를 해제하거나 `1`로 설정하세요.
+
 ```text
 ╭────────────────── Lecture processing ──────────────────╮
 │ ✓  Download                                  Complete │

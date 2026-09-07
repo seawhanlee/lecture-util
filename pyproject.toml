@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "rich>=13.7",
     "typer>=0.12",
+    "huggingface-hub>=1.29.0",
     "mlx-whisper>=0.4.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "faster-whisper>=1.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cublas-cu12>=12; sys_platform == 'linux' and platform_machine == 'x86_64'",

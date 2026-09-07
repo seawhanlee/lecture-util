@@ -123,6 +123,7 @@ def _transcribe_mlx(audio: Path, model: str, language: str) -> tuple[list[Segmen
         str(audio),
         path_or_hf_repo=MLX_MODELS.get(model, model),
         language=None if language == "auto" else language,
+        verbose=None,
     )
     segments = [
         Segment(float(item["start"]), float(item["end"]), str(item["text"]).strip())
@@ -207,6 +208,9 @@ def transcribe_audio(
     effective_device = detect_device(device)
     engine = engine_for_device(effective_device)
 
+    # Import lazily: CLI startup and non-transcription commands need no Hub setup.
+    from huggingface_hub.utils import disable_progress_bars
+
     def run(selected_model: str) -> tuple[list[Segment], str, float]:
         if effective_device == "mlx":
             return _transcribe_mlx(audio, selected_model, language)
@@ -214,15 +218,19 @@ def transcribe_audio(
 
     fallback_reason: str | None = None
     effective_model = model
-    try:
-        segments, detected_language, duration = run(model)
-    except BaseException as error:
-        if model != "large-v3" or not is_out_of_memory(error):
-            raise
-        fallback_reason = f"large-v3 ran out of memory: {error}"
-        effective_model = "turbo"
-        _release_memory(effective_device)
-        segments, detected_language, duration = run(effective_model)
+    # Hub's nested download bars compete with Rich Live for cursor control.
+    # Suppress only progress bars, preserving warnings and backend exceptions.
+    # The context restores progress on exit and respects explicit Hub settings.
+    with disable_progress_bars():
+        try:
+            segments, detected_language, duration = run(model)
+        except BaseException as error:
+            if model != "large-v3" or not is_out_of_memory(error):
+                raise
+            fallback_reason = f"large-v3 ran out of memory: {error}"
+            effective_model = "turbo"
+            _release_memory(effective_device)
+            segments, detected_language, duration = run(effective_model)
 
     return Transcript(
         language=detected_language,
