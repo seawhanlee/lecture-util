@@ -306,6 +306,7 @@ class CliTests(unittest.TestCase):
             with (
                 patch("lecture_util.cli.CodexSummarizer") as factory,
                 patch("lecture_util.cli.run_lecture", return_value=cached) as run_lecture,
+                patch("lecture_util.cli.ConsoleProgressReporter") as reporter,
             ):
                 _execute_run(
                     options(),
@@ -315,6 +316,11 @@ class CliTests(unittest.TestCase):
                 )
 
             factory.assert_called_once_with(model=None)
+            self.assertEqual(
+                reporter.call_args.kwargs["lecture_label"],
+                f"{COURSE} · 2026-09-04 압축성 유동",
+            )
+            self.assertEqual(reporter.call_args.kwargs["source_url"], URL)
             self.assertEqual(run_lecture.call_args.args[0], URL)
             self.assertEqual(run_lecture.call_args.args[1], cache)
             self.assertEqual(

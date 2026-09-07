@@ -15,9 +15,14 @@ from lecture_util.progress import ProgressEvent, format_duration
 
 
 class ConsoleProgressReporter:
-    def __init__(self, stages: tuple[str, ...], *, console: Console) -> None:
+    def __init__(
+        self, stages: tuple[str, ...], *, console: Console,
+        lecture_label: str | None = None, source_url: str | None = None,
+    ) -> None:
         self.stages = stages
         self.console = console
+        self.lecture_label = lecture_label
+        self.source_url = source_url
         self.events: dict[str, ProgressEvent] = {}
         self.warnings: list[str] = []
         self.latest = "Preparing lecture processing"
@@ -33,7 +38,18 @@ class ConsoleProgressReporter:
                 refresh_per_second=4, transient=True,
             )
             self.live.start()
+        else:
+            for line in self._lecture_details():
+                self.console.print(line)
         return self
+
+    def _lecture_details(self) -> list[Text]:
+        details = []
+        if self.lecture_label:
+            details.append(Text(self.lecture_label, style="bold", overflow="fold"))
+        if self.source_url:
+            details.append(Text(self.source_url, style="dim", overflow="fold"))
+        return details
 
     def __exit__(
         self, exc_type: type[BaseException] | None,
@@ -84,7 +100,10 @@ class ConsoleProgressReporter:
             marker, label, style = statuses[event.status] if event else ("·", "Waiting", "dim")
             icon = self.spinner if label == "Running" else Text(marker, style=style)
             table.add_row(icon, Text(stage.capitalize(), style=style), Text(label, style=style))
-        details = [table, Text(""), Text(self.latest)]
+        header = self._lecture_details()
+        if header:
+            header.append(Text(""))
+        details = [*header, table, Text(""), Text(self.latest)]
         details.extend(Text(f"! {warning}", style="yellow") for warning in self.warnings)
         return Panel(Group(*details), title="Lecture processing",
                      subtitle=f"Elapsed {format_duration(monotonic() - self.started)}",

@@ -97,11 +97,11 @@ def _execute_run(
     )
 
     summarizer = CodexSummarizer(model=options.llm_model)
-    console.rule(f"{course.name} · {lecture_date} {title}")
-    console.print(options.url)
     started = monotonic()
     with ConsoleProgressReporter(
         ("download", "audio", "transcription", "summary"), console=console,
+        lecture_label=f"{course.name} · {lecture_date} {title}",
+        source_url=options.url,
     ) as progress:
         paths = run_lecture(
             options.url,
