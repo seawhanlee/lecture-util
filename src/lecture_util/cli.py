@@ -9,7 +9,6 @@ from time import monotonic
 import typer
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
 
 from lecture_util.configuration import (
     default_app_config,
@@ -21,13 +20,14 @@ from lecture_util.configuration import (
     resolve_prompt,
     save_config,
 )
+from lecture_util.console_progress import ConsoleProgressReporter
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
 from lecture_util.media import validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
-from lecture_util.progress import ProgressEvent, format_duration
+from lecture_util.progress import format_duration
 from lecture_util.state import RunState, create_workspace
 from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import summary_stage
@@ -54,30 +54,6 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 console = Console()
-
-
-class ConsoleProgressReporter:
-    def __init__(self, stages: tuple[str, ...]) -> None:
-        self.positions = {stage: index for index, stage in enumerate(stages, 1)}
-        self.total = len(stages)
-
-    def __call__(self, event: ProgressEvent) -> None:
-        marker, style = {
-            "start": ("→", "cyan"),
-            "update": ("·", "blue"),
-            "complete": ("✓", "green"),
-            "cached": ("↻", "dim"),
-            "warning": ("!", "yellow"),
-            "failed": ("✗", "red"),
-        }[event.status]
-        position = self.positions.get(event.stage)
-        prefix = f"[{position}/{self.total}]" if position is not None else ""
-        line = Text()
-        line.append(f"{marker} ", style=style)
-        if prefix:
-            line.append(f"{prefix} ", style="bold")
-        line.append(event.message, style=style if event.status in {"failed", "warning"} else None)
-        console.print(line)
 
 
 def _run_or_exit(action: Callable[[], None]) -> None:
@@ -124,34 +100,36 @@ def _execute_run(
     console.rule(f"{course.name} · {lecture_date} {title}")
     console.print(options.url)
     started = monotonic()
-    progress = ConsoleProgressReporter(("download", "audio", "transcription", "summary"))
-    paths = run_lecture(
-        options.url,
-        cache_root or default_cache_root(),
-        summarizer,
-        video_path=video,
-        title=title,
-        course=course.name,
-        lecture_date=lecture_date,
-        published_summary=published.summary,
-        published_transcript=published.transcript,
-        tags=options.tags,
-        model=options.whisper_model,
-        language=options.language,
-        device=options.device,
-        prompt=options.prompt,
-        force=options.force,
-        progress=progress,
-    )
-    publish_lecture_notes(
-        published,
-        course=course,
-        lecture_date=lecture_date,
-        title=title,
-        url=options.url,
-        summary=paths.summary.read_text(encoding="utf-8"),
-        transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
-    )
+    with ConsoleProgressReporter(
+        ("download", "audio", "transcription", "summary"), console=console,
+    ) as progress:
+        paths = run_lecture(
+            options.url,
+            cache_root or default_cache_root(),
+            summarizer,
+            video_path=video,
+            title=title,
+            course=course.name,
+            lecture_date=lecture_date,
+            published_summary=published.summary,
+            published_transcript=published.transcript,
+            tags=options.tags,
+            model=options.whisper_model,
+            language=options.language,
+            device=options.device,
+            prompt=options.prompt,
+            force=options.force,
+            progress=progress,
+        )
+        publish_lecture_notes(
+            published,
+            course=course,
+            lecture_date=lecture_date,
+            title=title,
+            url=options.url,
+            summary=paths.summary.read_text(encoding="utf-8"),
+            transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
+        )
     console.print(
         f"[bold green]Complete[/bold green] {published.summary} "
         f"({format_duration(monotonic() - started)})"
@@ -335,9 +313,9 @@ def download_command(
             lecture_date=selected_date,
             tags=normalize_tags(tag),
         )
-        progress = ConsoleProgressReporter(("download", "audio"))
-        download_stage(paths, state, force=force, progress=progress)
-        audio_stage(paths, state, force=force, progress=progress)
+        with ConsoleProgressReporter(("download", "audio"), console=console) as progress:
+            download_stage(paths, state, force=force, progress=progress)
+            audio_stage(paths, state, force=force, progress=progress)
         console.print(f"[green]Prepared[/green] {paths.root}")
 
     _run_or_exit(action)
@@ -356,15 +334,16 @@ def transcribe_command(
     def action() -> None:
         paths = LecturePaths(lecture_dir)
         state = RunState(paths)
-        transcript = transcription_stage(
-            paths,
-            state,
-            model=model,
-            language=language,
-            device=device,
-            force=force,
-            progress=ConsoleProgressReporter(("transcription",)),
-        )
+        with ConsoleProgressReporter(("transcription",), console=console) as progress:
+            transcript = transcription_stage(
+                paths,
+                state,
+                model=model,
+                language=language,
+                device=device,
+                force=force,
+                progress=progress,
+            )
         console.print(
             f"[green]Transcribed[/green] {len(transcript.segments)} segments with "
             f"{transcript.engine}/{transcript.effective_model}"
@@ -387,16 +366,17 @@ def summarize_command(
         paths = LecturePaths(lecture_dir)
         state = RunState(paths)
         summarizer = CodexSummarizer(model=llm_model)
-        summary_stage(
-            load_transcript(paths.transcript_json),
-            paths.transcript_markdown,
-            paths.summary,
-            state,
-            summarizer,
-            prompt=resolve_prompt(prompt, prompt_file),
-            force=force,
-            progress=ConsoleProgressReporter(("summary",)),
-        )
+        with ConsoleProgressReporter(("summary",), console=console) as progress:
+            summary_stage(
+                load_transcript(paths.transcript_json),
+                paths.transcript_markdown,
+                paths.summary,
+                state,
+                summarizer,
+                prompt=resolve_prompt(prompt, prompt_file),
+                force=force,
+                progress=progress,
+            )
         console.print(f"[green]Summarized[/green] {paths.summary}")
 
     _run_or_exit(action)
