@@ -139,6 +139,7 @@ def summary_stage(
         and stage.get("status") == "complete"
         and stage.get("fingerprint") == fingerprint
         and summary_path.is_file()
+        and stage.get("sha256") == state.digest(summary_path)
     ):
         report(progress, "summary", "cached", f"Reusing summary from {summary_path}")
         return summary_path.read_text(encoding="utf-8")
@@ -175,6 +176,7 @@ def summary_stage(
         model=summarizer.model,
         fingerprint=fingerprint,
         output=str(summary_path),
+        sha256=state.digest(summary_path),
     )
     report(
         progress,

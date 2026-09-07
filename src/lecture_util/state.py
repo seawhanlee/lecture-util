@@ -77,8 +77,10 @@ class RunState:
         published_summary: Path | None = None,
         published_transcript: Path | None = None,
         tags: list[str] | None = None,
+        read_only: bool = False,
     ) -> None:
         self.paths = paths
+        self._digests: dict[tuple, str] = {}
         if paths.state.exists():
             try:
                 self.data: dict[str, Any] = json.loads(paths.state.read_text(encoding="utf-8"))
@@ -116,7 +118,8 @@ class RunState:
             self.data["published_transcript"] = str(published_transcript)
         if tags is not None:
             self.data["tags"] = tags
-        self.save()
+        if not read_only:
+            self.save()
 
     @property
     def url(self) -> str:
@@ -128,6 +131,17 @@ class RunState:
     def save(self) -> None:
         self.data["updated_at"] = utc_now()
         atomic_write_json(self.paths.state, self.data)
+
+    def digest(self, path: Path) -> str:
+        try:
+            stat = path.stat()
+        except OSError as error:
+            raise LectureUtilError(f"Could not inspect artifact {path}: {error}") from error
+        key = (str(path.resolve()), stat.st_dev, stat.st_ino, stat.st_size,
+               stat.st_mtime_ns, stat.st_ctime_ns)
+        if key not in self._digests:
+            self._digests[key] = file_digest(path)
+        return self._digests[key]
 
     def stage_complete(self, name: str) -> bool:
         return self.data.get("stages", {}).get(name, {}).get("status") == "complete"

@@ -20,9 +20,9 @@ def test_video_only_skips_notes_models_and_audio(tmp_path):
     selected.video_only = True
     with patch('lecture_util.cli.download_stage') as download, patch(
         'lecture_util.cli.audio_stage'
-    ) as audio, patch('lecture_util.cli.CodexSummarizer') as model, patch(
-        'lecture_util.cli.run_lecture'
-    ) as run, patch('lecture_util.cli.publish_lecture_notes') as publish:
+    ) as audio, patch('lecture_util.pipeline.CodexSummarizer') as model, patch(
+        'lecture_util.pipeline.run_lecture'
+    ) as run, patch('lecture_util.pipeline.publish_lecture_notes') as publish:
         _execute_run(selected, vault_root=vault, video_root=tmp_path / 'videos',
                      cache_root=tmp_path / 'cache')
         download.assert_called_once()

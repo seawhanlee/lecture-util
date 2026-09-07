@@ -176,6 +176,13 @@ def _publication_record(journal: Path | None) -> dict:
         record = json.loads(journal.read_text(encoding="utf-8"))
         if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
             raise ValueError("invalid publication record")
+        if record.get("status") not in {"pending", "complete"}:
+            raise ValueError("invalid publication status")
+        for name, entry in record["files"].items():
+            if (not isinstance(name, str) or not isinstance(entry, dict)
+                    or not isinstance(entry.get("content"), str)
+                    or entry.get("sha256") != hashlib.sha256(entry["content"].encode()).hexdigest()):
+                raise ValueError("invalid publication content or checksum")
         return record
     except (OSError, ValueError) as error:
         raise LectureUtilError(f"Could not read publication record {journal}: {error}") from error

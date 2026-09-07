@@ -312,9 +312,9 @@ class CliTests(unittest.TestCase):
             )
 
             with (
-                patch("lecture_util.cli.CodexSummarizer") as factory,
-                patch("lecture_util.cli.run_lecture", return_value=cached) as run_lecture,
-                patch("lecture_util.cli.ConsoleProgressReporter") as reporter,
+                patch("lecture_util.pipeline.CodexSummarizer") as factory,
+                patch("lecture_util.pipeline.run_lecture", return_value=cached) as run_lecture,
+                patch("lecture_util.pipeline.ConsoleProgressReporter") as reporter,
                 patch("lecture_util.cli.console", Console(
                     file=terminal, force_terminal=True, no_color=False, width=1000,
                 )),
@@ -366,8 +366,8 @@ class CliTests(unittest.TestCase):
                 "existing", encoding="utf-8"
             )
             with (
-                patch("lecture_util.cli.CodexSummarizer") as factory,
-                patch("lecture_util.cli.run_lecture") as run_lecture,
+                patch("lecture_util.pipeline.CodexSummarizer") as factory,
+                patch("lecture_util.pipeline.run_lecture") as run_lecture,
                 self.assertRaisesRegex(Exception, "already exists"),
             ):
                 _execute_run(
@@ -564,6 +564,7 @@ def test_transcribe_uses_saved_defaults_and_explicit_override(tmp_path):
 def test_summarize_uses_saved_defaults_and_empty_reset(tmp_path):
     with (patch('lecture_util.cli.load_config', return_value=configured_defaults()),
           patch('lecture_util.cli.load_transcript'),
+          patch('lecture_util.cli.restore_transcript_files'),
           patch('lecture_util.cli.summary_stage') as summarize):
         result = CliRunner().invoke(app, ['summarize', str(tmp_path), '--llm-model', ''])
     assert result.exit_code == 0, result.output

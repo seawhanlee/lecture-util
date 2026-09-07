@@ -87,11 +87,11 @@ class RunOptions:
     force: bool
     semester_start: str | None = None
     reasoning_effort: str | None = None
-    source: LectureSource | None = None
-    video_only: bool = False
     compute_type: str = "auto"
     batch_size: int = 0
     beam_size: int | None = None
+    source: LectureSource | None = None
+    video_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

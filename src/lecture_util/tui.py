@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
@@ -23,6 +25,7 @@ from lecture_util.configuration import (
     resolve_prompt,
 )
 from lecture_util.errors import LectureUtilError
+from lecture_util.pipeline import preflight_run
 from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionTuning
 from lecture_util.models import RunOptions, TranscriptionOptions
 from lecture_util.configuration import validate_transcription_options
@@ -61,8 +64,11 @@ class LectureSetupApp(FormApp[RunOptions]):
         vault_root: Path = DEFAULT_VAULT_ROOT,
         *,
         config: AppConfig | None = None,
+        initial: RunOptions | None = None,
     ) -> None:
         super().__init__()
+        self.initial = initial
+        self.checking = False
         defaults = default_app_config()
         self.config = config or AppConfig(
             vault_root=vault_root,
@@ -128,7 +134,10 @@ class LectureSetupApp(FormApp[RunOptions]):
             yield Input(value=self.config.language, id="language")
             yield TranscriptionTuning(self.config.compute_type, self.config.batch_size, self.config.beam_size)
         with Collapsible(title="Summary", collapsed=True):
-            yield CodexModelPicker(self.config.llm_model, self.config.reasoning_effort)
+            yield CodexModelPicker(
+                self.initial.llm_model if self.initial else self.config.llm_model,
+                self.initial.reasoning_effort if self.initial else self.config.reasoning_effort,
+            )
             yield Label("Summary prompt", classes="field-label")
             yield Select(
                 (
@@ -145,6 +154,8 @@ class LectureSetupApp(FormApp[RunOptions]):
 
     def on_mount(self) -> None:
         super().on_mount()
+        if self.initial is not None:
+            self._restore_input(self.initial)
         self._update_prompt_mode()
         self.query_one("#lecture-date", Input).focus()
 
@@ -227,6 +238,8 @@ class LectureSetupApp(FormApp[RunOptions]):
         )
 
     def _submit(self) -> None:
+        if self.checking:
+            return
         error_label = self.query_one("#error", Label)
         try:
             options = self._build_options()
@@ -234,7 +247,41 @@ class LectureSetupApp(FormApp[RunOptions]):
             self.show_error(error)
             return
         error_label.display = False
-        self.exit(options)
+        self.checking = True
+        self.query_one("#run", Button).disabled = True
+        self.run_worker(self._preflight(options), exclusive=True)
+
+    async def _preflight(self, options: RunOptions) -> None:
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lecture-preflight")
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                executor, preflight_run, options, self.vault_root, self.config.video_root,
+            )
+        except Exception as error:
+            self.error_field = "device"
+            self.show_error(LectureUtilError(str(error)))
+        else:
+            self.call_later(self.exit, options)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+            self.checking = False
+            self.query_one("#run", Button).disabled = False
+
+    def _restore_input(self, options: RunOptions) -> None:
+        for field, value in {
+            "lecture-date": options.lecture_date, "semester-start": options.semester_start,
+            "lecture-title": options.title, "source": options.url,
+            "tags": ", ".join(options.tags or []), "whisper-model": options.whisper_model,
+            "language": options.language, "batch-size": str(options.batch_size),
+            "beam-size": str(options.beam_size) if options.beam_size is not None else "",
+        }.items():
+            self.query_one(f"#{field}", Input).value = value or ""
+        self.query_one("#course", Select).value = options.course
+        self.query_one("#device", Select).value = options.device
+        self.query_one("#compute-type", Select).value = options.compute_type
+        self.query_one("#force", Checkbox).value = options.force
+        self.query_one("#prompt-mode", Select).value = "inline"
+        self.query_one("#inline-prompt", TextArea).text = options.prompt
 
     def _build_options(self) -> RunOptions:
         self.error_field = "source"
@@ -328,7 +375,5 @@ class LectureSetupApp(FormApp[RunOptions]):
         )
 
 
-def run_tui(config: AppConfig | None = None) -> RunOptions | None:
-    if config is None:
-        return LectureSetupApp().run()
-    return LectureSetupApp(config=config).run()
+def run_tui(config: AppConfig | None = None, *, initial: RunOptions | None = None) -> RunOptions | None:
+    return LectureSetupApp(config=config, initial=initial).run()

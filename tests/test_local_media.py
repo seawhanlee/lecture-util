@@ -109,8 +109,8 @@ def test_local_cli_publication_and_conflict(tmp_path):
     cached.summary.write_text('Summary')
     cached.transcript_markdown.write_text('Transcript')
     output = StringIO()
-    with patch('lecture_util.cli.run_lecture', return_value=cached) as run, patch(
-        'lecture_util.cli.CodexSummarizer'
+    with patch('lecture_util.pipeline.run_lecture', return_value=cached) as run, patch(
+        'lecture_util.pipeline.CodexSummarizer'
     ), patch('lecture_util.cli.console', Console(file=output)):
         _execute_run(selected, vault_root=vault, cache_root=tmp_path / "cache")
         assert run.call_args.kwargs['video_path'] is None

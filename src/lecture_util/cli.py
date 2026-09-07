@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 import sys
-from time import monotonic
 
 import typer
 import click
@@ -12,7 +12,9 @@ from typer.core import TyperGroup
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+from rich.prompt import Prompt
 
+from lecture_util.recovery import load_request
 from lecture_util.configuration import (
     default_app_config,
     default_config_path,
@@ -30,24 +32,18 @@ from lecture_util.interactive import prompt_lecture
 from lecture_util.media import resolve_source, validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
-from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
-from lecture_util.progress import format_duration
+from lecture_util.pipeline import audio_stage, download_stage, transcription_stage
 from lecture_util.state import RunState, create_workspace, lecture_id, workspace_lock
 from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import summary_stage
-from lecture_util.transcription import load_transcript
+from lecture_util.transcription import load_transcript, restore_transcript_files
 from lecture_util.tui import run_tui
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
     default_cache_root,
-    default_semester_start,
-    ensure_paths_available,
     lecture_video_path,
-    publish_lecture_notes,
-    published_lecture_paths,
     resolve_course,
     validate_lecture_date,
-    validate_semester_start,
     validate_title,
 )
 
@@ -79,6 +75,9 @@ console = Console()
 def _run_or_exit(action: Callable[[], None]) -> None:
     try:
         action()
+    except KeyboardInterrupt:
+        console.print("Interrupted.")
+        raise typer.Exit(130)
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
@@ -101,26 +100,24 @@ def _execute_download(
         video_root, selected_course, selected_date, selected_title,
         semester_start=semester_start,
     )
-    paths, state = create_workspace(
-        url, output_dir, video_path=video, title=selected_title,
-        course=selected_course.name, lecture_date=selected_date, tags=tags,
-    )
-    stages = ("download",) if video_only else ("download", "audio")
-    with ConsoleProgressReporter(stages, console=console) as progress:
-        download_stage(paths, state, force=force, progress=progress)
-        if not video_only:
-            audio_stage(paths, state, force=force, progress=progress)
+    with workspace_lock(output_dir / f"lecture-{lecture_id(url)}"):
+        paths, state = create_workspace(
+            url, output_dir, video_path=video, title=selected_title,
+            course=selected_course.name, lecture_date=selected_date, tags=tags,
+        )
+        stages = ("download",) if video_only else ("download", "audio")
+        with ConsoleProgressReporter(stages, console=console) as progress:
+            download_stage(paths, state, force=force, progress=progress)
+            if not video_only:
+                audio_stage(paths, state, force=force, progress=progress)
     console.print(Text(f"Video: {video}"), highlight=False, soft_wrap=True)
     if not video_only:
         console.print(Text(f"Prepared: {paths.root}"), highlight=False, soft_wrap=True)
 
 
 def _execute_run(
-    options: RunOptions,
-    *,
-    vault_root: Path = DEFAULT_VAULT_ROOT,
-    video_root: Path | None = None,
-    cache_root: Path | None = None,
+    options: RunOptions, *, vault_root: Path = DEFAULT_VAULT_ROOT,
+    video_root: Path | None = None, cache_root: Path | None = None,
 ) -> None:
     if options.video_only:
         _execute_download(
@@ -134,83 +131,9 @@ def _execute_run(
             force=options.force,
         )
         return
-    course = resolve_course(options.course, vault_root)
-    lecture_date = validate_lecture_date(options.lecture_date)
-    semester_start = validate_semester_start(
-        options.semester_start
-        or default_semester_start(date.fromisoformat(lecture_date))
-    )
-    title = validate_title(options.title)
-    published = published_lecture_paths(
-        course,
-        lecture_date,
-        title,
-        semester_start=semester_start,
-    )
-    source = options.source or resolve_source(options.url)
-    journal = (
-        (cache_root or default_cache_root())
-        / f"lecture-{lecture_id(source.cache_key)}" / "publication.json"
-    )
-    ensure_paths_available(published, journal=journal)
-    video = lecture_video_path(
-        video_root or default_cache_root(),
-        course,
-        lecture_date,
-        title,
-        semester_start=semester_start,
-    )
-
-    summarizer = CodexSummarizer(
-        model=options.llm_model, reasoning_effort=options.reasoning_effort,
-    )
-    started = monotonic()
-    with ConsoleProgressReporter(
-        (("download", "audio", "transcription", "summary")
-         if source.kind == "hls" else ("audio", "transcription", "summary")),
-        console=console,
-        lecture_label=f"{course.name} · {lecture_date} {title}",
-        source_url=source.location,
-    ) as progress:
-        paths = run_lecture(
-            source.location,
-            cache_root or default_cache_root(),
-            summarizer,
-            video_path=video if source.kind == "hls" else None,
-            source=source,
-            title=title,
-            course=course.name,
-            lecture_date=lecture_date,
-            published_summary=published.summary,
-            published_transcript=published.transcript,
-            tags=options.tags,
-            model=options.whisper_model,
-            language=options.language,
-            device=options.device,
-            compute_type=options.compute_type, batch_size=options.batch_size, beam_size=options.beam_size,
-            prompt=options.prompt,
-            force=options.force,
-            progress=progress,
-        )
-        publish_lecture_notes(
-            published,
-            course=course,
-            lecture_date=lecture_date,
-            title=title,
-            url=source.location,
-            summary=paths.summary.read_text(encoding="utf-8"),
-            transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
-            journal=journal,
-        )
-    console.print(
-        Text.assemble(
-            ("Complete", "bold green"),
-            f" {published.summary} ({format_duration(monotonic() - started)})",
-        ),
-        highlight=False, soft_wrap=True,
-    )
-    label = f"Video: {video}" if source.kind == "hls" else f"Source: {source.location}"
-    console.print(Text(label), highlight=False, soft_wrap=True)
+    from lecture_util.pipeline import execute_run
+    execute_run(options, vault_root=vault_root, video_root=video_root,
+                cache_root=cache_root, console=console)
 
 
 def _interactive_terminal() -> bool:
@@ -242,11 +165,22 @@ def root_callback(ctx: typer.Context) -> None:
         if options is None:
             console.print("Cancelled before processing.")
             return
-        _execute_run(
-            options,
-            vault_root=config.vault_root,
-            video_root=config.video_root,
-        )
+        while options is not None:
+            try:
+                _execute_run(options, vault_root=config.vault_root, video_root=config.video_root)
+                break
+            except KeyboardInterrupt:
+                console.print("Interrupted; use the resume command above.")
+                raise typer.Exit(130)
+            except Exception as error:
+                console.print(Text(str(error), style="red"))
+                choice = Prompt.ask("Next action", choices=["retry", "edit", "quit"],
+                                    default="quit", console=console)
+                if choice == "quit":
+                    raise typer.Exit(1)
+                options = replace(options, force=False)
+                if choice == "edit":
+                    options = run_tui(config, initial=options)
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error
@@ -463,24 +397,25 @@ def transcribe_command(
     def action() -> None:
         config = load_config(validate_vault=False) or default_app_config()
         paths = LecturePaths(lecture_dir)
-        state = RunState(paths)
-        with ConsoleProgressReporter(("transcription",), console=console) as progress:
-            transcript = transcription_stage(
-                paths,
-                state,
-                model=model if model is not None else config.whisper_model,
-                language=language if language is not None else config.language,
-                device=device if device is not None else config.device,
-                compute_type=config.compute_type if compute_type is None else compute_type,
-                batch_size=config.batch_size if batch_size is None else batch_size,
-                beam_size=config.beam_size if beam_size is None else beam_size,
-                force=force,
-                progress=progress,
+        with workspace_lock(lecture_dir):
+            state = RunState(paths)
+            with ConsoleProgressReporter(("transcription",), console=console) as progress:
+                transcript = transcription_stage(
+                    paths,
+                    state,
+                    model=model if model is not None else config.whisper_model,
+                    language=language if language is not None else config.language,
+                    device=device if device is not None else config.device,
+                    compute_type=config.compute_type if compute_type is None else compute_type,
+                    batch_size=config.batch_size if batch_size is None else batch_size,
+                    beam_size=config.beam_size if beam_size is None else beam_size,
+                    force=force,
+                    progress=progress,
+                )
+            console.print(
+                f"[green]Transcribed[/green] {len(transcript.segments)} segments with "
+                f"{transcript.engine}/{transcript.effective_model}"
             )
-        console.print(
-            f"[green]Transcribed[/green] {len(transcript.segments)} segments with "
-            f"{transcript.engine}/{transcript.effective_model}"
-        )
 
     _run_or_exit(action)
 
@@ -499,24 +434,27 @@ def summarize_command(
     def action() -> None:
         config = load_config(validate_vault=False) or default_app_config()
         paths = LecturePaths(lecture_dir)
-        state = RunState(paths)
-        summarizer = CodexSummarizer(
-            model=config.llm_model if llm_model is None else llm_model.strip() or None,
-            reasoning_effort=(config.reasoning_effort if reasoning_effort is None
-                              else reasoning_effort.strip() or None),
-        )
-        with ConsoleProgressReporter(("summary",), console=console) as progress:
-            summary_stage(
-                load_transcript(paths.transcript_json),
-                paths.transcript_markdown,
-                paths.summary,
-                state,
-                summarizer,
-                prompt=resolve_prompt(prompt, prompt_file),
-                force=force,
-                progress=progress,
+        with workspace_lock(lecture_dir):
+            state = RunState(paths)
+            summarizer = CodexSummarizer(
+                model=config.llm_model if llm_model is None else llm_model.strip() or None,
+                reasoning_effort=(config.reasoning_effort if reasoning_effort is None
+                                  else reasoning_effort.strip() or None),
             )
-        console.print(f"[green]Summarized[/green] {paths.summary}")
+            transcript = load_transcript(paths.transcript_json)
+            restore_transcript_files(transcript, paths.transcript_markdown, paths.transcript_srt)
+            with ConsoleProgressReporter(("summary",), console=console) as progress:
+                summary_stage(
+                    transcript,
+                    paths.transcript_markdown,
+                    paths.summary,
+                    state,
+                    summarizer,
+                    prompt=resolve_prompt(prompt, prompt_file),
+                    force=force,
+                    progress=progress,
+                )
+            console.print(f"[green]Summarized[/green] {paths.summary}")
 
     _run_or_exit(action)
 
@@ -531,3 +469,13 @@ def doctor_command() -> None:
     console.print(table)
     if any(not check.ok for check in checks):
         raise typer.Exit(1)
+
+
+@app.command("resume")
+def resume_command(lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False)) -> None:
+    """Resume a recorded run using its original settings and prompt."""
+    def action() -> None:
+        options, vault, videos = load_request(lecture_dir.resolve())
+        _execute_run(options, vault_root=vault, video_root=videos,
+                     cache_root=lecture_dir.resolve().parent)
+    _run_or_exit(action)

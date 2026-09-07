@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import pytest
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -387,3 +388,45 @@ class VideoOnlyTuiTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertTrue(app.query_one('#processing-mode', Select).disabled)
                 self.assertEqual(app.query_one('#processing-mode', Select).value, 'full')
+
+
+@pytest.fixture(autouse=True)
+def isolate_preflight(monkeypatch):
+    monkeypatch.setattr("lecture_util.tui.preflight_run", lambda *args: None)
+
+
+class RecoveryFormTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_preflight_preserves_input(self):
+        from lecture_util.errors import DependencyError
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            app = configured_app(root)
+            with patch('lecture_util.tui.preflight_run', side_effect=DependencyError('GPU unavailable')):
+                async with app.run_test(size=(100, 40)) as pilot:
+                    app.query_one('#lecture-date', Input).value = '2026-09-07'
+                    app.query_one('#lecture-title', Input).value = 'Title'
+                    app.query_one('#source', Input).value = URL
+                    await pilot.press('ctrl+r')
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
+                    assert app.is_running
+                    assert app.query_one('#lecture-title', Input).value == 'Title'
+                    assert 'GPU unavailable' in str(app.query_one('#error', Label).render())
+
+    async def test_restores_prompt_and_tuning(self):
+        from lecture_util.models import RunOptions
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            config = configured_app(root).config
+            initial = RunOptions(URL, COURSE, '2026-09-07', 'Saved', 'gpt-test', ['tag'],
+                                 'turbo', 'ko', 'cpu', 'Saved\nprompt', False,
+                                 '2026-08-31', 'high', 'int8', 4, 1)
+            from lecture_util.media import resolve_source
+            initial.source = resolve_source(initial.url)
+            app = LectureSetupApp(config=config, initial=initial)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                restored = app._build_options()
+                assert restored == initial
