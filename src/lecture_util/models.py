@@ -29,6 +29,8 @@ class Transcript:
     effective_model: str
     segments: list[Segment]
     fallback_reason: str | None = None
+    requested_options: dict[str, Any] = field(default_factory=dict)
+    effective_options: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -42,6 +44,8 @@ class Transcript:
             requested_model=str(data.get("requested_model", "unknown")),
             effective_model=str(data.get("effective_model", "unknown")),
             fallback_reason=data.get("fallback_reason"),
+            requested_options=data.get("requested_options", {}),
+            effective_options=data.get("effective_options", {}),
             segments=[Segment.from_dict(item) for item in data.get("segments", [])],
         )
 
@@ -85,6 +89,9 @@ class RunOptions:
     reasoning_effort: str | None = None
     source: LectureSource | None = None
     video_only: bool = False
+    compute_type: str = "auto"
+    batch_size: int = 0
+    beam_size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,3 +105,16 @@ class LectureSource:
         if self.kind == "hls":
             return self.location
         return f"local:{self.location}:{self.content_hash}"
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptionOptions:
+    model: str = "large-v3"
+    language: str = "auto"
+    device: str = "auto"
+    compute_type: str = "auto"
+    batch_size: int = 0
+    beam_size: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

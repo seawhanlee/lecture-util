@@ -443,23 +443,24 @@ def download_command(
 @app.command("transcribe")
 def transcribe_command(
     lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False),
-    model: str = typer.Option("large-v3", "--whisper-model"),
-    language: str = typer.Option("auto", "--language"),
-    device: str = typer.Option("auto", "--device"),
+    model: str | None = typer.Option(None, "--whisper-model"),
+    language: str | None = typer.Option(None, "--language"),
+    device: str | None = typer.Option(None, "--device"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Transcribe an already downloaded lecture."""
 
     def action() -> None:
+        config = load_config(validate_vault=False) or default_app_config()
         paths = LecturePaths(lecture_dir)
         state = RunState(paths)
         with ConsoleProgressReporter(("transcription",), console=console) as progress:
             transcript = transcription_stage(
                 paths,
                 state,
-                model=model,
-                language=language,
-                device=device,
+                model=model if model is not None else config.whisper_model,
+                language=language if language is not None else config.language,
+                device=device if device is not None else config.device,
                 force=force,
                 progress=progress,
             )
@@ -483,10 +484,13 @@ def summarize_command(
     """Summarize an existing transcript."""
 
     def action() -> None:
+        config = load_config(validate_vault=False) or default_app_config()
         paths = LecturePaths(lecture_dir)
         state = RunState(paths)
         summarizer = CodexSummarizer(
-            model=llm_model, reasoning_effort=(reasoning_effort or "").strip() or None,
+            model=config.llm_model if llm_model is None else llm_model.strip() or None,
+            reasoning_effort=(config.reasoning_effort if reasoning_effort is None
+                              else reasoning_effort.strip() or None),
         )
         with ConsoleProgressReporter(("summary",), console=console) as progress:
             summary_stage(

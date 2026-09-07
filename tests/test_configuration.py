@@ -161,3 +161,18 @@ def test_invalid_device_is_rejected_when_loading(tmp_path: Path) -> None:
 
     with pytest.raises(LectureUtilError, match="transcription device"):
         load_config(path)
+
+
+def test_transcription_options_roundtrip_and_legacy_defaults(tmp_path):
+    vault = tmp_path / 'vault'
+    create_vault(vault)
+    path = tmp_path / 'config.json'
+    save_config(replace(config_for(vault), compute_type='int8_float16', batch_size=4, beam_size=1), path)
+    config = load_config(path)
+    assert (config.compute_type, config.batch_size, config.beam_size) == ('int8_float16', 4, 1)
+    data = json.loads(path.read_text())
+    for key in ('compute_type', 'batch_size', 'beam_size'):
+        del data[key]
+    path.write_text(json.dumps(data))
+    config = load_config(path)
+    assert (config.compute_type, config.batch_size, config.beam_size) == ('auto', 0, None)

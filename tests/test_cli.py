@@ -546,3 +546,27 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_transcribe_uses_saved_defaults_and_explicit_override(tmp_path):
+    from lecture_util.models import Transcript
+    transcript = Transcript('ko', 1, 'test', 'turbo', 'turbo', [])
+    with (patch('lecture_util.cli.load_config', return_value=configured_defaults()) as load,
+          patch('lecture_util.cli.transcription_stage', return_value=transcript) as transcribe):
+        result = CliRunner().invoke(app, ['transcribe', str(tmp_path), '--device', 'cpu'])
+    assert result.exit_code == 0, result.output
+    load.assert_called_once_with(validate_vault=False)
+    assert transcribe.call_args.kwargs['model'] == 'turbo'
+    assert transcribe.call_args.kwargs['language'] == 'ko'
+    assert transcribe.call_args.kwargs['device'] == 'cpu'
+
+
+def test_summarize_uses_saved_defaults_and_empty_reset(tmp_path):
+    with (patch('lecture_util.cli.load_config', return_value=configured_defaults()),
+          patch('lecture_util.cli.load_transcript'),
+          patch('lecture_util.cli.summary_stage') as summarize):
+        result = CliRunner().invoke(app, ['summarize', str(tmp_path), '--llm-model', ''])
+    assert result.exit_code == 0, result.output
+    backend = summarize.call_args.args[4]
+    assert backend.model is None
+    assert backend.reasoning_effort == 'high'

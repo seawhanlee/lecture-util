@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from lecture_util.errors import LectureUtilError
+from lecture_util.models import TranscriptionOptions
 from lecture_util.media import validate_hls_url
 from lecture_util.state import atomic_write_json
 from lecture_util.summary import DEFAULT_PROMPT
@@ -34,6 +35,9 @@ class AppConfig:
     llm_model: str | None = None
     video_in_vault_allowed: bool = False
     reasoning_effort: str | None = None
+    compute_type: str = "auto"
+    batch_size: int = 0
+    beam_size: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -102,6 +106,10 @@ def validate_app_config(
         raise LectureUtilError(
             f"Configured transcription device must be one of: {supported}."
         )
+    validate_transcription_options(TranscriptionOptions(
+        whisper_model, language, config.device, config.compute_type,
+        config.batch_size, config.beam_size,
+    ))
     llm_model = config.llm_model.strip() if config.llm_model else None
 
     if validate_vault:
@@ -130,6 +138,7 @@ def validate_app_config(
         video_root=video_root,
         semester_start=semester_start,
         whisper_model=whisper_model,
+        compute_type=config.compute_type, batch_size=config.batch_size, beam_size=config.beam_size,
         language=language,
         device=config.device,
         llm_model=llm_model,
@@ -186,6 +195,9 @@ def app_config_from_dict(
             video_root=Path(video_root),
             semester_start=semester_start,
             whisper_model=whisper_model,
+            compute_type=data.get("compute_type", "auto"),
+            batch_size=data.get("batch_size", 0),
+            beam_size=data.get("beam_size"),
             language=language,
             device=device,
             llm_model=llm_model_value,
@@ -334,3 +346,32 @@ def resolve_prompt(prompt: str | None, prompt_file: Path | None) -> str:
         except OSError as error:
             raise LectureUtilError(f"Could not read prompt file {prompt_file}: {error}") from error
     return prompt if prompt is not None else DEFAULT_PROMPT
+
+
+# Whisper's shared multilingual tokenizer codes; no model import on CLI startup.
+LANGUAGE_CODES = frozenset(
+    "auto af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi "
+    "fo fr gl gu ha haw he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln "
+    "lo lt lv mg mi mk ml mn mr ms mt my ne nl nn no oc pa pl ps pt ro ru sa sd "
+    "si sk sl sn so sq sr su sv sw ta te tg th tk tl tr tt uk ur uz vi yi yo zh yue".split()
+)
+COMPUTE_TYPES = ("auto", "float16", "float32", "int8", "int8_float16")
+
+
+def validate_transcription_options(options: TranscriptionOptions) -> None:
+    if not isinstance(options.model, str) or not options.model.strip():
+        raise LectureUtilError("Enter a Whisper model.")
+    if options.language not in LANGUAGE_CODES:
+        raise LectureUtilError("Unsupported lecture language; use auto or a Whisper language code such as ko/en.")
+    if options.device not in SUPPORTED_DEVICES:
+        raise LectureUtilError(f"Unsupported device: {options.device}")
+    if options.compute_type not in COMPUTE_TYPES:
+        raise LectureUtilError(f"Unsupported compute type: {options.compute_type}")
+    if type(options.batch_size) is not int or options.batch_size < 0:
+        raise LectureUtilError("Batch size must be a non-negative integer (0 disables batching).")
+    if options.beam_size is not None and (type(options.beam_size) is not int or options.beam_size < 1):
+        raise LectureUtilError("Beam size must be a positive integer or blank for the default.")
+    if options.device == "mlx" and (options.compute_type != "auto" or options.batch_size or options.beam_size is not None):
+        raise LectureUtilError("MLX requires compute type auto, batch size 0 and default beam size.")
+    if options.model.startswith(("/", "./", "../", "~")) and not Path(options.model).expanduser().is_dir():
+        raise LectureUtilError(f"Local Whisper model directory does not exist: {options.model}")
