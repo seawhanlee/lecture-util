@@ -15,6 +15,7 @@ from time import monotonic
 from typing import Any
 
 from lecture_util.models import TranscriptionOptions
+from lecture_util.progress import ProgressEvent
 from lecture_util.state import atomic_write_json
 
 
@@ -65,7 +66,7 @@ def measure(audio: Path, options: TranscriptionOptions) -> dict[str, Any]:
     changed = started
     times = {'preparation': 0.0, 'inference': 0.0}
 
-    def progress(event) -> None:
+    def progress(event: ProgressEvent) -> None:
         nonlocal phase, changed
         selected = 'inference' if event.phase == 'inference' else 'preparation'
         if event.phase is None or selected == phase:
@@ -81,11 +82,14 @@ def measure(audio: Path, options: TranscriptionOptions) -> dict[str, Any]:
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if sys.platform != 'darwin':
         rss *= 1024
+    is_mlx = transcript.effective_options.get('device') == 'mlx'
     return {
         'requested': options.to_dict(), 'effective': transcript.effective_options,
         'fallback_reason': transcript.fallback_reason,
         'duration_seconds': transcript.duration, 'wall_seconds': finished - started,
-        'preparation_seconds': times['preparation'], 'inference_seconds': times['inference'],
+        'preparation_seconds': None if is_mlx else times['preparation'],
+        'inference_seconds': None if is_mlx else times['inference'],
+        'combined_transcription_seconds': times['inference'] if is_mlx else None,
         'real_time_factor': ((finished - started) / transcript.duration if transcript.duration else None),
         'peak_process_rss_bytes': rss, 'peak_gpu_bytes': None,
         'memory_method': 'OS process peak RSS; dedicated GPU memory is not measured',
@@ -111,6 +115,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--audio', type=Path, required=True, help='Local WAV; never downloads lectures')
     parser.add_argument('--device', default='auto', choices=['auto', 'cuda', 'cpu', 'mlx'])
+    parser.add_argument('--language', default='auto', help='Whisper language code or auto')
     parser.add_argument('--models', nargs='+', default=['large-v3', 'turbo'])
     parser.add_argument('--compute-types', nargs='+', default=['auto'])
     parser.add_argument('--batch-sizes', nargs='+', type=int, default=[0])
@@ -122,6 +127,8 @@ def main() -> None:
     args = parser.parse_args()
     if not args.audio.is_file():
         parser.error('audio file does not exist')
+    if args.output.suffix != '.json':
+        parser.error('output must have a .json extension; a sibling .csv is also written')
     if args.worker_options:
         options = TranscriptionOptions(**json.loads(args.worker_options))
         atomic_write_json(args.output, measure(args.audio, options))
@@ -136,7 +143,7 @@ def main() -> None:
         args.models, args.compute_types, args.batch_sizes, args.beam_sizes,
     ):
         try:
-            options = TranscriptionOptions(model=model, device=args.device, compute_type=compute,
+            options = TranscriptionOptions(model=model, language=args.language, device=args.device, compute_type=compute,
                                            batch_size=batch, beam_size=None if beam == 'default' else int(beam))
             validate_transcription_options(options)
         except (ValueError, RuntimeError) as error:

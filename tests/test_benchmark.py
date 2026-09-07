@@ -33,3 +33,21 @@ def test_results_include_failed_combinations(tmp_path):
     write_results(output, rows)
     assert json.loads(output.read_text()) == rows
     assert 'OOM' in output.with_suffix('.csv').read_text()
+
+
+def test_measure_separates_preparation_and_inference(tmp_path, monkeypatch):
+    from lecture_util.benchmark import measure
+    from lecture_util.models import Transcript, TranscriptionOptions, Segment
+    from lecture_util.progress import ProgressEvent
+    monkeypatch.setattr('lecture_util.transcription.preflight_transcription', lambda _: 'cpu')
+    monkeypatch.setattr('lecture_util.benchmark.monotonic', iter([0, 2, 6]).__next__)
+    def transcribe(audio, **kwargs):
+        kwargs['progress'](ProgressEvent('transcription', 'update', 'Infer', phase='inference'))
+        return Transcript('ko', 8, 'test', 'turbo', 'turbo', [Segment(0, 8, 'hello')],
+                          effective_options={'device': 'cpu'})
+    monkeypatch.setattr('lecture_util.transcription.transcribe_audio', transcribe)
+    result = measure(tmp_path / 'audio.wav', TranscriptionOptions(model='turbo', device='cpu'))
+    assert result['preparation_seconds'] == 2
+    assert result['inference_seconds'] == 4
+    assert result['real_time_factor'] == 0.75
+    assert result['peak_gpu_bytes'] is None

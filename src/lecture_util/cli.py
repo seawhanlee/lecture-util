@@ -3,18 +3,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
-from pathlib import Path
 import sys
+from pathlib import Path
 
-import typer
 import click
+import typer
 from typer.core import TyperGroup
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.prompt import Prompt
 
-from lecture_util.recovery import load_request
 from lecture_util.configuration import (
     default_app_config,
     default_config_path,
@@ -23,6 +22,7 @@ from lecture_util.configuration import (
     normalize_tags,
     read_urls,
     resolve_prompt,
+    resolve_beam_size,
     save_config,
 )
 from lecture_util.console_progress import ConsoleProgressReporter
@@ -33,6 +33,7 @@ from lecture_util.media import resolve_source, validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
 from lecture_util.pipeline import audio_stage, download_stage, transcription_stage
+from lecture_util.recovery import load_request
 from lecture_util.state import RunState, create_workspace, lecture_id, workspace_lock
 from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import summary_stage
@@ -259,7 +260,7 @@ def run_command(
     prompt_file: Path | None = typer.Option(None, "--prompt-file", dir_okay=False),
     compute_type: str | None = typer.Option(None, "--compute-type", help="auto/float16/float32/int8/int8_float16"),
     batch_size: int | None = typer.Option(None, "--batch-size", min=0, help="0 disables batching"),
-    beam_size: int | None = typer.Option(None, "--beam-size", min=1),
+    beam_size: str | None = typer.Option(None, "--beam-size", help="Positive integer or default to reset the saved value"),
     force: bool = typer.Option(False, "--force"),
     video_only: bool = typer.Option(False, "--video-only", help="Download video without audio extraction or notes"),
 ) -> None:
@@ -295,7 +296,7 @@ def run_command(
                 whisper_model=config.whisper_model if whisper_model is None else whisper_model,
                 compute_type=config.compute_type if compute_type is None else compute_type,
                 batch_size=config.batch_size if batch_size is None else batch_size,
-                beam_size=config.beam_size if beam_size is None else beam_size,
+                beam_size=resolve_beam_size(beam_size, config.beam_size),
                 language=config.language if language is None else language,
                 device=config.device if device is None else device,
                 prompt=selected_prompt,
@@ -389,7 +390,7 @@ def transcribe_command(
     device: str | None = typer.Option(None, "--device"),
     compute_type: str | None = typer.Option(None, "--compute-type", help="auto/float16/float32/int8/int8_float16"),
     batch_size: int | None = typer.Option(None, "--batch-size", min=0, help="0 disables batching"),
-    beam_size: int | None = typer.Option(None, "--beam-size", min=1),
+    beam_size: str | None = typer.Option(None, "--beam-size", help="Positive integer or default to reset the saved value"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Transcribe an already downloaded lecture."""
@@ -408,7 +409,7 @@ def transcribe_command(
                     device=device if device is not None else config.device,
                     compute_type=config.compute_type if compute_type is None else compute_type,
                     batch_size=config.batch_size if batch_size is None else batch_size,
-                    beam_size=config.beam_size if beam_size is None else beam_size,
+                    beam_size=resolve_beam_size(beam_size, config.beam_size),
                     force=force,
                     progress=progress,
                 )

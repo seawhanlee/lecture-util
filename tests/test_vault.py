@@ -191,3 +191,14 @@ def test_exclusive_note_creation_does_not_replace(tmp_path):
     with pytest.raises(LectureUtilError):
         _create_note(path, 'generated')
     assert path.read_text() == 'user'
+
+
+def test_removed_lecture_directory_is_never_recreated(tmp_path):
+    directory = create_course(tmp_path, 'Course')
+    course = resolve_course('Course', tmp_path)
+    paths = published_lecture_paths(course, '2026-09-04', 'Title')
+    directory.rmdir()
+    with pytest.raises(LectureUtilError, match='directory changed'):
+        publish_lecture_notes(paths, course=course, lecture_date='2026-09-04', title='Title',
+                              url='https://example.com/a.m3u8', summary='Summary', transcript='Words')
+    assert not directory.exists()

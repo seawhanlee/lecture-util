@@ -571,3 +571,13 @@ def test_summarize_uses_saved_defaults_and_empty_reset(tmp_path):
     backend = summarize.call_args.args[4]
     assert backend.model is None
     assert backend.reasoning_effort == 'high'
+
+
+def test_explicit_beam_default_resets_saved_value(tmp_path):
+    from dataclasses import replace
+    from lecture_util.models import Transcript
+    with (patch('lecture_util.cli.load_config', return_value=replace(configured_defaults(), beam_size=1)),
+          patch('lecture_util.cli.transcription_stage', return_value=Transcript('ko', 1, 'test', 'turbo', 'turbo', [])) as transcribe):
+        result = CliRunner().invoke(app, ['transcribe', str(tmp_path), '--beam-size', 'default'])
+    assert result.exit_code == 0, result.output
+    assert transcribe.call_args.kwargs['beam_size'] is None

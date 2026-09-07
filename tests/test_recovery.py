@@ -81,3 +81,21 @@ def test_workspace_collision_does_not_overwrite_request(tmp_path):
     with workspace_lock(root), pytest.raises(LectureUtilError, match='Another process'):
         execute_run(replace(options, title='Other'), cache_root=tmp_path)
     assert (root / 'request.json').read_bytes() == before
+
+
+def test_local_resume_restores_source_and_rejects_changed_content(tmp_path):
+    from lecture_util.models import LectureSource
+
+    media = tmp_path / "lecture.wav"
+    media.write_bytes(b"original")
+    source = LectureSource("audio", str(media), "original-hash")
+    options = replace(request(), url=str(media), source=source)
+    root = tmp_path / f"lecture-{lecture_id(source.cache_key)}"
+    save_request(root, options, tmp_path / "vault", tmp_path / "videos")
+    with patch("lecture_util.recovery.resolve_source", return_value=source):
+        restored, _, _ = load_request(root)
+    assert restored == options
+    changed = replace(source, content_hash="changed-hash")
+    with patch("lecture_util.recovery.resolve_source", return_value=changed):
+        with pytest.raises(LectureUtilError, match="workspace does not match"):
+            load_request(root)

@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import tempfile
-import fcntl
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from lecture_util.errors import LectureUtilError
 from lecture_util.models import LecturePaths, LectureSource
+
+
+_RUN_DIGESTS: ContextVar[dict | None] = ContextVar("lecture_run_digests", default=None)
 
 
 def utc_now() -> str:
@@ -55,9 +59,11 @@ def workspace_lock(root: Path) -> Iterator[None]:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise LectureUtilError(f"Another process is using {root}.") from error
+        token = _RUN_DIGESTS.set({})
         try:
             yield
         finally:
+            _RUN_DIGESTS.reset(token)
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
@@ -80,11 +86,13 @@ class RunState:
         read_only: bool = False,
     ) -> None:
         self.paths = paths
-        self._digests: dict[tuple, str] = {}
+        current_digests = _RUN_DIGESTS.get()
+        self._digests: dict[tuple, str] = current_digests if current_digests is not None else {}
         if paths.state.exists():
             try:
                 self.data: dict[str, Any] = json.loads(paths.state.read_text(encoding="utf-8"))
                 if (not isinstance(self.data, dict)
+                        or self.data.get("version") != 1
                         or not isinstance(self.data.get("stages"), dict)
                         or any(not isinstance(stage, dict)
                                for stage in self.data["stages"].values())):
@@ -105,6 +113,8 @@ class RunState:
                 "stages": {},
             }
         if url is not None:
+            if self.data.get("url") not in {None, url}:
+                raise LectureUtilError(f"Workspace URL conflict in {paths.state}.")
             self.data["url"] = url
         if title is not None:
             self.data["title"] = title

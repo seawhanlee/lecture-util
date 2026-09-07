@@ -221,6 +221,7 @@ class FormApp(App[T]):
         return operation()
 
     def show_error(self, error: LectureUtilError) -> None:
+        self.error_field = getattr(error, "field", self.error_field)
         for widget in self.query(".invalid"):
             widget.remove_class("invalid")
         label = self.query_one("#error", Label)

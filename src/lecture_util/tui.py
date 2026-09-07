@@ -259,7 +259,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             )
         except Exception as error:
             self.error_field = "device"
-            self.show_error(LectureUtilError(str(error)))
+            self.show_error(error if isinstance(error, LectureUtilError) else LectureUtilError(str(error)))
         else:
             self.call_later(self.exit, options)
         finally:

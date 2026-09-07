@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from lecture_util.errors import LectureUtilError
+from lecture_util.errors import LectureUtilError, TranscriptionOptionError
 from lecture_util.models import TranscriptionOptions
 from lecture_util.media import validate_hls_url
 from lecture_util.state import atomic_write_json
@@ -360,18 +360,32 @@ COMPUTE_TYPES = ("auto", "float16", "float32", "int8", "int8_float16")
 
 def validate_transcription_options(options: TranscriptionOptions) -> None:
     if not isinstance(options.model, str) or not options.model.strip():
-        raise LectureUtilError("Enter a Whisper model.")
-    if options.language not in LANGUAGE_CODES:
-        raise LectureUtilError("Unsupported lecture language; use auto or a Whisper language code such as ko/en.")
+        raise TranscriptionOptionError("Enter a Whisper model.", "whisper-model")
+    if not isinstance(options.language, str) or options.language not in LANGUAGE_CODES:
+        raise TranscriptionOptionError("Unsupported lecture language; use auto or a Whisper language code such as ko/en.", "language")
     if options.device not in SUPPORTED_DEVICES:
-        raise LectureUtilError(f"Unsupported device: {options.device}")
+        raise TranscriptionOptionError(f"Unsupported device: {options.device}", "device")
     if options.compute_type not in COMPUTE_TYPES:
-        raise LectureUtilError(f"Unsupported compute type: {options.compute_type}")
+        raise TranscriptionOptionError(f"Unsupported compute type: {options.compute_type}", "compute-type")
     if type(options.batch_size) is not int or options.batch_size < 0:
-        raise LectureUtilError("Batch size must be a non-negative integer (0 disables batching).")
+        raise TranscriptionOptionError("Batch size must be a non-negative integer (0 disables batching).", "batch-size")
     if options.beam_size is not None and (type(options.beam_size) is not int or options.beam_size < 1):
-        raise LectureUtilError("Beam size must be a positive integer or blank for the default.")
+        raise TranscriptionOptionError("Beam size must be a positive integer or blank for the default.", "beam-size")
     if options.device == "mlx" and (options.compute_type != "auto" or options.batch_size or options.beam_size is not None):
-        raise LectureUtilError("MLX requires compute type auto, batch size 0 and default beam size.")
+        raise TranscriptionOptionError("MLX requires compute type auto, batch size 0 and default beam size.", "device")
     if options.model.startswith(("/", "./", "../", "~")) and not Path(options.model).expanduser().is_dir():
-        raise LectureUtilError(f"Local Whisper model directory does not exist: {options.model}")
+        raise TranscriptionOptionError(f"Local Whisper model directory does not exist: {options.model}", "whisper-model")
+
+
+def resolve_beam_size(value: str | None, default: int | None) -> int | None:
+    if value is None:
+        return default
+    if value.strip() in {"", "default"}:
+        return None
+    try:
+        result = int(value)
+        if result < 1:
+            raise ValueError("not positive")
+        return result
+    except ValueError as error:
+        raise TranscriptionOptionError("Beam size must be a positive integer or default.", "beam-size") from error

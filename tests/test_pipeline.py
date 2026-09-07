@@ -224,3 +224,42 @@ def test_cached_transcript_restores_only_missing_files(tmp_path):
     run.assert_not_called()
     assert paths.transcript_markdown.read_text() == 'user edit'
     assert 'hello' in paths.transcript_srt.read_text()
+
+
+def test_valid_cache_preflight_never_loads_backend(tmp_path):
+    from lecture_util.pipeline import preflight_preparation
+    paths, state = create_workspace('https://example.com/a.m3u8', tmp_path)
+    paths.video.write_bytes(b'video')
+    paths.audio.write_bytes(b'audio')
+    transcript = Transcript('ko', 1, 'test', 'large-v3', 'large-v3', [])
+    save_transcript(transcript, paths.transcript_json, paths.transcript_markdown, paths.transcript_srt)
+    state.complete_stage('download', output=str(paths.video), sha256=file_digest(paths.video))
+    state.complete_stage('audio', input_sha256=file_digest(paths.video), sha256=file_digest(paths.audio))
+    options = TranscriptionOptions(device='cpu')
+    state.complete_stage('transcription', options=options.to_dict(), backend_platform=backend_platform(),
+                         input_sha256=file_digest(paths.audio))
+    with patch('lecture_util.pipeline.preflight_transcription') as preflight:
+        preflight_preparation(paths, state, options)
+    preflight.assert_not_called()
+
+
+def test_invalid_language_prevents_download(tmp_path):
+    import pytest
+    from lecture_util.pipeline import prepare_lecture
+    with patch('lecture_util.pipeline.download_hls') as download:
+        with pytest.raises(LectureUtilError, match='language'):
+            prepare_lecture('https://example.com/a.m3u8', tmp_path, language='invalid')
+    download.assert_not_called()
+
+
+def test_failed_force_download_can_resume_replacement(tmp_path):
+    import pytest
+    paths, state = create_workspace('https://example.com/a.m3u8', tmp_path)
+    paths.video.write_bytes(b'old')
+    with patch('lecture_util.pipeline.download_hls', side_effect=RuntimeError('offline')):
+        with pytest.raises(RuntimeError):
+            download_stage(paths, state, force=True)
+    with (patch('lecture_util.pipeline.download_hls', side_effect=lambda url, path, **kwargs: path.write_bytes(b'new')),
+          patch('lecture_util.pipeline.tool_version', return_value='test')):
+        download_stage(paths, state)
+    assert paths.video.read_bytes() == b'new'

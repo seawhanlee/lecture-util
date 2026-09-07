@@ -5,6 +5,8 @@ import gc
 import importlib
 import json
 import platform
+import math
+import wave
 import shutil
 import subprocess
 from dataclasses import replace
@@ -124,7 +126,7 @@ def _transcribe_mlx(audio: Path, model: str, language: str) -> tuple[list[Segmen
     )
     result = mlx_whisper.transcribe(
         str(audio),
-        path_or_hf_repo=MLX_MODELS.get(model, model),
+        path_or_hf_repo=MLX_MODELS.get(model, str(Path(model).expanduser()) if model.startswith("~") else model),
         language=None if language == "auto" else language,
         verbose=None,
     )
@@ -133,7 +135,12 @@ def _transcribe_mlx(audio: Path, model: str, language: str) -> tuple[list[Segmen
         for item in result.get("segments", [])
         if str(item.get("text", "")).strip()
     ]
-    duration = max((segment.end for segment in segments), default=0.0)
+    try:
+        with wave.open(str(audio), "rb") as stream:
+            duration = stream.getnframes() / stream.getframerate()
+    except (OSError, wave.Error, EOFError):
+        duration = max((segment.end for segment in segments), default=0.0)
+    _release_memory("mlx")
     return segments, str(result.get("language", language)), duration
 
 
@@ -360,8 +367,17 @@ def save_transcript(transcript: Transcript, json_path: Path, markdown_path: Path
 
 def load_transcript(path: Path) -> Transcript:
     try:
-        return Transcript.from_dict(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("segments"), list):
+            raise ValueError("expected a transcript object with a segments list")
+        transcript = Transcript.from_dict(data)
+        if not math.isfinite(transcript.duration) or transcript.duration < 0:
+            raise ValueError("invalid transcript duration")
+        if any(not math.isfinite(segment.start) or not math.isfinite(segment.end)
+               or not 0 <= segment.start <= segment.end for segment in transcript.segments):
+            raise ValueError("invalid segment timestamps")
+        return transcript
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         raise LectureUtilError(f"Could not load transcript: {path}: {error}") from error
 
 

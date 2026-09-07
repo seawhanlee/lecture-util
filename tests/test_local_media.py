@@ -80,6 +80,7 @@ def test_local_pipeline_real_ffmpeg(preflight, tmp_path, video):
         paths, state, _ = prepare_lecture(str(media), tmp_path / 'cache')
         prepare_lecture(str(media), tmp_path / 'cache')
         assert transcribe.call_count == 1
+        assert preflight.call_count == 1
         prepare_lecture(str(media), tmp_path / 'cache', force=True)
         assert transcribe.call_count == 2
         download.assert_not_called()

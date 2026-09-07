@@ -1,33 +1,38 @@
 from __future__ import annotations
 
 import platform
-import json
 from dataclasses import replace
 from datetime import date
-from rich.console import Console
-from rich.text import Text
 from pathlib import Path
 from time import monotonic
 
-from lecture_util.errors import LectureUtilError
-from lecture_util.console_progress import ConsoleProgressReporter
-from lecture_util.recovery import save_request, resume_message
-from lecture_util.summarizers import CodexSummarizer
-from lecture_util.state import workspace_lock, lecture_id
-from lecture_util.vault import (
-    DEFAULT_VAULT_ROOT, default_cache_root, default_semester_start,
-    resolve_course, validate_lecture_date, validate_semester_start, validate_title,
-    published_lecture_paths, ensure_paths_available, lecture_video_path,
-    publish_lecture_notes, _publication_record,
-)
-from lecture_util.media import download_hls, extract_audio, resolve_source, tool_version
-from lecture_util.models import LecturePaths, LectureSource, Transcript, TranscriptionOptions, RunOptions
-from lecture_util.progress import ProgressCallback, format_duration, format_size, report
-from lecture_util.state import RunState, create_workspace, file_digest
-from lecture_util.summarizers import Summarizer
-from lecture_util.summary import DEFAULT_PROMPT, summary_stage
-from lecture_util.transcription import save_transcript, transcribe_audio, preflight_transcription
+from rich.console import Console
+from rich.text import Text
 
+from lecture_util.console_progress import ConsoleProgressReporter
+from lecture_util.errors import LectureUtilError
+from lecture_util.media import download_hls, extract_audio, resolve_source, tool_version
+from lecture_util.models import LecturePaths, LectureSource, RunOptions, Transcript, TranscriptionOptions
+from lecture_util.progress import ProgressCallback, format_duration, format_size, report
+from lecture_util.recovery import resume_message, save_request
+from lecture_util.state import RunState, create_workspace, lecture_id, workspace_lock
+from lecture_util.summarizers import CodexSummarizer, Summarizer
+from lecture_util.summary import DEFAULT_PROMPT, summary_stage
+from lecture_util.transcription import preflight_transcription, save_transcript, transcribe_audio
+from lecture_util.vault import (
+    DEFAULT_VAULT_ROOT,
+    _publication_record,
+    default_cache_root,
+    default_semester_start,
+    ensure_paths_available,
+    lecture_video_path,
+    publish_lecture_notes,
+    published_lecture_paths,
+    resolve_course,
+    validate_lecture_date,
+    validate_semester_start,
+    validate_title,
+)
 
 def download_stage(
     paths: LecturePaths,
@@ -308,7 +313,9 @@ def run_lecture(
     source = source or resolve_source(url)
     preview = LecturePaths(output_dir / f"lecture-{lecture_id(source.cache_key)}", video_path=video_path)
     preview_state = RunState(preview, read_only=True)
-    if summarizer.name == "codex" and (force or not summary_cached(preview, preview_state, summarizer, prompt)):
+    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size)
+    prepared = cached_preparation(preview, preview_state, options, force=force)[2]
+    if summarizer.name == "codex" and (not prepared or not summary_cached(preview, preview_state, summarizer, prompt)):
         require_executable("codex")
     paths, state, transcript = prepare_lecture(
         url,
@@ -361,21 +368,10 @@ def preflight_preparation(paths: LecturePaths, state: RunState,
     from lecture_util.configuration import validate_transcription_options
     from lecture_util.media import require_executable
     validate_transcription_options(options)
-    download = state.data.get("stages", {}).get("download", {})
-    video_digest = state.digest(paths.video) if paths.video.is_file() else None
-    download_cached = (not force and state.stage_complete("download")
-                       and video_digest is not None and download.get("output") == str(paths.video)
-                       and download.get("sha256", video_digest) == video_digest)
-    local = state.data.get("source", {}).get("kind") in {"audio", "video"}
-    if local:
-        video_digest = state.digest(Path(state.data["source"]["location"]))
-        download_cached = not force
-    audio = state.data.get("stages", {}).get("audio", {})
-    audio_cached = (download_cached and state.stage_complete("audio") and paths.audio.is_file()
-                    and audio.get("input_sha256") == video_digest
-                    and audio.get("sha256") == state.digest(paths.audio))
-    if not audio_cached or not transcription_cached(paths, state, options):
+    download_cached, audio_cached, transcript_cached = cached_preparation(paths, state, options, force=force)
+    if not transcript_cached:
         preflight_transcription(options)
+    local = state.data.get("source", {}).get("kind") in {"audio", "video"}
     if not local and not download_cached:
         require_executable("yt-dlp")
     if not audio_cached:
@@ -402,7 +398,8 @@ def preflight_run(options: RunOptions, vault_root: Path, video_root: Path) -> No
     state = RunState(paths, read_only=True)
     state.data["source"] = {"kind": source.kind, "location": source.location}
     preflight_preparation(paths, state, transcription_options(options), force=options.force)
-    if options.force or not summary_cached(paths, state, CodexSummarizer(
+    prepared = cached_preparation(paths, state, transcription_options(options), force=options.force)[2]
+    if not prepared or not summary_cached(paths, state, CodexSummarizer(
             model=options.llm_model, reasoning_effort=options.reasoning_effort), options.prompt):
         require_executable("codex")
 
@@ -428,7 +425,7 @@ def execute_run(
                 stage = next((name for name, item in state.data["stages"].items()
                               if item.get("status") in {"failed", "running"}), stage)
                 journal = root / "publication.json"
-                if journal.exists():
+                if _publication_record(journal).get("status") == "pending":
                     stage = "publication"
             except LectureUtilError:
                 pass
@@ -474,6 +471,7 @@ def _execute_run_locked(
     )
     pending = _publication_record(journal).get("status") == "pending"
     if not pending:
+        RunState(LecturePaths(journal.parent), read_only=True)
         save_request(journal.parent, replace(options, semester_start=semester_start),
                      vault_root, video_root or default_cache_root())
     started = monotonic()
@@ -485,7 +483,8 @@ def _execute_run_locked(
         source_url=options.url,
     ) as progress:
         if pending:
-            paths = LecturePaths(journal.parent)
+            for cached_stage in ("download", "audio", "transcription", "summary"):
+                report(progress, cached_stage, "cached", "Resuming recorded publication")
             summary_text = transcript_text = ""
         else:
             paths = run_lecture(
@@ -541,7 +540,6 @@ def _execute_run_locked(
     console.print(Text(label), highlight=False)
 
 
-
 def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer, prompt: str) -> bool:
     from lecture_util.summary import summary_fingerprint
     from lecture_util.transcription import load_transcript
@@ -552,3 +550,23 @@ def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer,
     return (stage.get("fingerprint") == summary_fingerprint(
         load_transcript(paths.transcript_json), paths.transcript_markdown, summarizer, prompt,
     ) and stage.get("sha256") == state.digest(paths.summary))
+
+
+def cached_preparation(paths: LecturePaths, state: RunState, options: TranscriptionOptions,
+                       *, force: bool = False) -> tuple[bool, bool, bool]:
+    download = state.data.get("stages", {}).get("download", {})
+    video_digest = state.digest(paths.video) if paths.video.is_file() else None
+    download_cached = (not force and state.stage_complete("download")
+                       and video_digest is not None and download.get("output") == str(paths.video)
+                       and download.get("sha256", video_digest) == video_digest)
+    source = state.data.get("source", {})
+    if source.get("kind") in {"audio", "video"}:
+        video_digest = state.digest(Path(source["location"]))
+        download_cached = not force
+    audio = state.data.get("stages", {}).get("audio", {})
+    audio_cached = (download_cached and state.stage_complete("audio") and paths.audio.is_file()
+                    and audio.get("input_sha256") == video_digest
+                    and audio.get("sha256") == state.digest(paths.audio))
+    return bool(download_cached), bool(audio_cached), bool(
+        audio_cached and transcription_cached(paths, state, options)
+    )

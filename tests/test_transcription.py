@@ -212,3 +212,14 @@ def test_preflight_rejects_unsupported_compute_without_model_loading():
     with (patch('lecture_util.transcription._module', return_value=module),
           pytest.raises(DependencyError, match='unsupported')):
         preflight_transcription(TranscriptionOptions(device='cpu', compute_type='float16'))
+
+
+def test_malformed_transcript_is_reported_as_domain_error(tmp_path):
+    import pytest
+    from lecture_util.transcription import load_transcript
+    from lecture_util.errors import LectureUtilError
+    path = tmp_path / 'transcript.json'
+    for content in ('[]', '{}', '{bad', '{"segments": [{"start": -1, "end": 0, "text": "bad"}]}'):
+        path.write_text(content)
+        with pytest.raises(LectureUtilError, match='Could not load transcript'):
+            load_transcript(path)
