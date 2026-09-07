@@ -3,10 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
+import fcntl
+from contextlib import contextmanager
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from lecture_util.errors import LectureUtilError
 from lecture_util.models import LecturePaths, LectureSource
 
 
@@ -20,9 +25,40 @@ def lecture_id(url: str) -> str:
 
 def atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.replace(temporary, path)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def file_digest(path: Path) -> str:
+    try:
+        with path.open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+    except OSError as error:
+        raise LectureUtilError(f"Could not read artifact {path}: {error}") from error
+
+
+@contextmanager
+def workspace_lock(root: Path) -> Iterator[None]:
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".lock").open("a") as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise LectureUtilError(f"Another process is using {root}.") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
@@ -44,7 +80,18 @@ class RunState:
     ) -> None:
         self.paths = paths
         if paths.state.exists():
-            self.data: dict[str, Any] = json.loads(paths.state.read_text(encoding="utf-8"))
+            try:
+                self.data: dict[str, Any] = json.loads(paths.state.read_text(encoding="utf-8"))
+                if (not isinstance(self.data, dict)
+                        or not isinstance(self.data.get("stages"), dict)
+                        or any(not isinstance(stage, dict)
+                               for stage in self.data["stages"].values())):
+                    raise ValueError("invalid state structure")
+            except (OSError, ValueError) as error:
+                raise LectureUtilError(
+                    f"Could not load state {paths.state}: {error}. "
+                    "Restore a valid run.json backup before retrying."
+                ) from error
         else:
             self.data = {
                 "version": 1,
@@ -86,6 +133,11 @@ class RunState:
         return self.data.get("stages", {}).get(name, {}).get("status") == "complete"
 
     def start_stage(self, name: str, **details: Any) -> None:
+        stages = ("download", "audio", "transcription", "summary")
+        if name in stages:
+            for dependent in stages[stages.index(name) + 1:]:
+                if dependent in self.data["stages"]:
+                    self.data["stages"][dependent]["status"] = "stale"
         self.data.setdefault("stages", {})[name] = {
             "status": "running",
             "started_at": utc_now(),

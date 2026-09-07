@@ -71,3 +71,25 @@ class RunStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_workspace_lock_is_exclusive_and_released(tmp_path):
+    import pytest
+    from lecture_util.state import workspace_lock
+    from lecture_util.errors import LectureUtilError
+    with workspace_lock(tmp_path):
+        with pytest.raises(LectureUtilError, match='Another process'):
+            with workspace_lock(tmp_path):
+                pass
+    with workspace_lock(tmp_path):
+        pass
+
+
+def test_corrupt_state_is_preserved(tmp_path):
+    import pytest
+    from lecture_util.errors import LectureUtilError
+    paths = LecturePaths(tmp_path)
+    paths.state.write_text('{broken')
+    with pytest.raises(LectureUtilError, match='Restore'):
+        RunState(paths)
+    assert paths.state.read_text() == '{broken'

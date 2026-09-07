@@ -9,7 +9,7 @@ from lecture_util.errors import LectureUtilError
 from lecture_util.models import Segment, Transcript
 from lecture_util.pipeline import audio_stage, download_stage, transcription_stage
 from lecture_util.progress import ProgressEvent
-from lecture_util.state import create_workspace
+from lecture_util.state import create_workspace, file_digest
 from lecture_util.transcription import save_transcript
 
 
@@ -47,7 +47,7 @@ class PipelineTests(unittest.TestCase):
                 video_path=video,
             )
             state.start_stage("download")
-            state.complete_stage("download", output="old/cache/source.mp4")
+            state.complete_stage("download", output=str(video))
             events: list[ProgressEvent] = []
 
             with patch("lecture_util.pipeline.download_hls") as download:
@@ -131,6 +131,7 @@ class PipelineTests(unittest.TestCase):
                 requested_model="large-v3",
                 requested_language="auto",
                 requested_device="cpu",
+                input_sha256=file_digest(paths.audio),
             )
             state.complete_stage("transcription")
 
@@ -175,3 +176,47 @@ class PipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_changed_audio_invalidates_transcription(tmp_path):
+    from lecture_util.state import file_digest
+    paths, state = create_workspace('https://example.com/a.m3u8', tmp_path)
+    paths.audio.write_bytes(b'old')
+    state.start_stage('transcription', requested_model='large-v3',
+                      requested_language='auto', requested_device='cpu',
+                      input_sha256=file_digest(paths.audio))
+    state.complete_stage('transcription')
+    paths.audio.write_bytes(b'new')
+    replacement = Transcript('ko', 1, 'test', 'large-v3', 'large-v3', [])
+    with patch('lecture_util.pipeline.transcribe_audio', return_value=replacement) as run:
+        transcription_stage(paths, state, device='cpu')
+    run.assert_called_once()
+
+
+def test_upstream_failure_invalidates_dependents(tmp_path):
+    paths, state = create_workspace('https://example.com/a.m3u8', tmp_path)
+    for stage in ('download', 'audio', 'transcription', 'summary'):
+        state.complete_stage(stage)
+    with patch('lecture_util.pipeline.download_hls', side_effect=RuntimeError('network')):
+        import pytest
+        with pytest.raises(RuntimeError):
+            download_stage(paths, state, force=True)
+    assert all(not state.stage_complete(stage) for stage in ('audio', 'transcription', 'summary'))
+
+
+def test_cached_transcript_restores_only_missing_files(tmp_path):
+    from lecture_util.state import file_digest
+    paths, state = create_workspace('https://example.com/a.m3u8', tmp_path)
+    paths.audio.touch()
+    transcript = Transcript('ko', 1, 'test', 'large-v3', 'large-v3', [Segment(0, 1, 'hello')])
+    save_transcript(transcript, paths.transcript_json, paths.transcript_markdown, paths.transcript_srt)
+    paths.transcript_markdown.write_text('user edit')
+    paths.transcript_srt.unlink()
+    state.start_stage('transcription', requested_model='large-v3', requested_language='auto',
+                      requested_device='cpu', input_sha256=file_digest(paths.audio))
+    state.complete_stage('transcription')
+    with patch('lecture_util.pipeline.transcribe_audio') as run:
+        transcription_stage(paths, state, device='cpu')
+    run.assert_not_called()
+    assert paths.transcript_markdown.read_text() == 'user edit'
+    assert 'hello' in paths.transcript_srt.read_text()

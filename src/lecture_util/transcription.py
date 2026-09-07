@@ -289,3 +289,9 @@ def load_transcript(path: Path) -> Transcript:
         return Transcript.from_dict(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise LectureUtilError(f"Could not load transcript: {path}: {error}") from error
+
+
+def restore_transcript_files(transcript: Transcript, markdown: Path, srt: Path) -> None:
+    for path, render in ((markdown, transcript_markdown), (srt, transcript_srt)):
+        if not path.exists():
+            atomic_write_text(path, render(transcript))

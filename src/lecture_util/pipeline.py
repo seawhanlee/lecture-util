@@ -7,7 +7,7 @@ from lecture_util.errors import LectureUtilError
 from lecture_util.media import download_hls, extract_audio, resolve_source, tool_version
 from lecture_util.models import LecturePaths, LectureSource, Transcript
 from lecture_util.progress import ProgressCallback, format_duration, format_size, report
-from lecture_util.state import RunState, create_workspace
+from lecture_util.state import RunState, create_workspace, file_digest
 from lecture_util.summarizers import Summarizer
 from lecture_util.summary import DEFAULT_PROMPT, summary_stage
 from lecture_util.transcription import save_transcript, transcribe_audio
@@ -20,7 +20,13 @@ def download_stage(
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> None:
-    if not force and state.stage_complete("download") and paths.video.is_file():
+    previous = state.data.get("stages", {}).get("download", {})
+    video_digest = file_digest(paths.video) if paths.video.is_file() else None
+    if (not force and state.stage_complete("download") and paths.video.is_file()
+            and previous.get("output") == str(paths.video)
+            and previous.get("sha256", video_digest) == video_digest):
+        if "sha256" not in previous:
+            state.complete_stage("download", sha256=video_digest)
         report(
             progress,
             "download",
@@ -50,6 +56,7 @@ def download_stage(
     state.complete_stage(
         "download",
         output=str(paths.video),
+        sha256=file_digest(paths.video),
         yt_dlp_version=tool_version("yt-dlp"),
         ffmpeg_version=tool_version("ffmpeg"),
     )
@@ -69,7 +76,14 @@ def audio_stage(
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> None:
-    if not force and state.stage_complete("audio") and paths.audio.is_file():
+    source = state.data.get("source", {})
+    local = source.get("kind") in {"audio", "video"}
+    input_path = Path(source["location"]) if local else paths.video
+    source_digest = file_digest(input_path)
+    previous = state.data.get("stages", {}).get("audio", {})
+    if (not force and state.stage_complete("audio") and paths.audio.is_file()
+            and previous.get("input_sha256") == source_digest
+            and previous.get("sha256") == file_digest(paths.audio)):
         report(
             progress,
             "audio",
@@ -77,13 +91,10 @@ def audio_stage(
             f"Reusing prepared audio ({format_size(paths.audio.stat().st_size)})",
         )
         return
-    source = state.data.get("source", {})
-    local = source.get("kind") in {"audio", "video"}
-    input_path = Path(source["location"]) if local else paths.video
     verb = "Normalizing" if source.get("kind") == "audio" else "Extracting"
     started = monotonic()
     report(progress, "audio", "start", f"{verb} 16 kHz mono audio")
-    state.start_stage("audio")
+    state.start_stage("audio", input_sha256=source_digest)
     try:
         extract_audio(input_path, paths.audio)
     except BaseException as error:
@@ -95,7 +106,8 @@ def audio_stage(
             f"Audio extraction failed after {format_duration(monotonic() - started)}",
         )
         raise
-    state.complete_stage("audio", output=str(paths.audio), sample_rate=16000, channels=1)
+    state.complete_stage("audio", output=str(paths.audio), sample_rate=16000, channels=1,
+                         sha256=file_digest(paths.audio))
     report(
         progress,
         "audio",
@@ -115,6 +127,7 @@ def transcription_stage(
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> Transcript:
+    source_digest = file_digest(paths.audio)
     previous = state.data.get("stages", {}).get("transcription", {})
     same_options = (
         previous.get("requested_model") == model
@@ -125,11 +138,14 @@ def transcription_stage(
         not force
         and state.stage_complete("transcription")
         and same_options
+        and previous.get("input_sha256") == source_digest
         and paths.transcript_json.is_file()
     ):
         from lecture_util.transcription import load_transcript
 
         transcript = load_transcript(paths.transcript_json)
+        from lecture_util.transcription import restore_transcript_files
+        restore_transcript_files(transcript, paths.transcript_markdown, paths.transcript_srt)
         report(
             progress,
             "transcription",
@@ -146,6 +162,7 @@ def transcription_stage(
     )
     state.start_stage(
         "transcription",
+        input_sha256=source_digest,
         requested_model=model,
         requested_language=language,
         requested_device=device,
