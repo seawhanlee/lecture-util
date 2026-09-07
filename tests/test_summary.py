@@ -143,6 +143,33 @@ class SummaryTests(unittest.TestCase):
         ):
             self.assertIn(instruction, DEVELOPER_PROMPT)
 
+    def test_revised_format_regenerates_cached_summary_with_custom_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths, state = create_workspace(
+                "https://example.com/index.m3u8", Path(directory),
+            )
+            paths.transcript_markdown.write_text("Transcript", encoding="utf-8")
+            transcript = sample_transcript(2)
+            summarizer = FakeSummarizer()
+            custom_prompt = "Focus on definitions."
+            with patch("lecture_util.summary.DEVELOPER_PROMPT", "Return plain Markdown."):
+                summary_stage(
+                    transcript, paths.transcript_markdown, paths.summary,
+                    state, summarizer, prompt=custom_prompt,
+                )
+            summary_stage(
+                transcript, paths.transcript_markdown, paths.summary,
+                state, summarizer, prompt=custom_prompt,
+            )
+            summary_stage(
+                transcript, paths.transcript_markdown, paths.summary,
+                state, summarizer, prompt=custom_prompt,
+            )
+            self.assertEqual(summarizer.prompts, [custom_prompt, custom_prompt])
+            self.assertEqual(summarizer.developer_prompts[-1], DEVELOPER_PROMPT)
+            self.assertIn("Obsidian Flavored Markdown", summarizer.developer_prompts[-1])
+            self.assertEqual(paths.summary.read_text(), "# Note 2\n\nA compact result.\n")
+
     def test_developer_prompt_participates_in_summary_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             transcript_path = Path(directory) / "transcript.md"

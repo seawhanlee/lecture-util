@@ -40,7 +40,7 @@ def _agent_prompt(developer_prompt: str, user_prompt: str, transcript_name: str)
     return (
         f"{developer_prompt}\n\n"
         f"The lecture transcript is attached as the local file `{transcript_name}`. "
-        "Read that file, do not modify any files, and return only the requested Markdown.\n\n"
+        "Read that file, do not modify any files, and return only the requested Obsidian Flavored Markdown.\n\n"
         f"{user_prompt}"
     )
 
