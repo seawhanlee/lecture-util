@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 from lecture_util.errors import LectureUtilError
-from lecture_util.state import atomic_write_text
+from lecture_util.state import atomic_write_json, file_digest, directory_lock
 
 
 DEFAULT_VAULT_ROOT = Path.home() / "Documents" / "학부연구생"
@@ -166,8 +169,32 @@ def lecture_video_path(
     return video_root / course.name / f"{week}주차" / f"{normalized_title}.mp4"
 
 
-def ensure_paths_available(paths: PublishedLecturePaths) -> None:
-    conflicts = [path for path in (paths.summary, paths.transcript) if path.exists()]
+def _publication_record(journal: Path | None) -> dict:
+    if journal is None or not journal.exists():
+        return {}
+    try:
+        record = json.loads(journal.read_text(encoding="utf-8"))
+        if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
+            raise ValueError("invalid publication record")
+        return record
+    except (OSError, ValueError) as error:
+        raise LectureUtilError(f"Could not read publication record {journal}: {error}") from error
+
+
+def ensure_paths_available(
+    paths: PublishedLecturePaths, *, journal: Path | None = None,
+) -> None:
+    record = _publication_record(journal)
+    expected = {str(paths.summary), str(paths.transcript)}
+    recovering = record.get("status") == "pending" and set(record.get("files", {})) == expected
+    conflicts = []
+    for path in (paths.summary, paths.transcript):
+        if path.exists() or path.is_symlink():
+            entry = record.get("files", {}).get(str(path), {})
+            if (recovering and path.is_file() and not path.is_symlink()
+                    and isinstance(entry, dict) and entry.get("sha256") == file_digest(path)):
+                continue
+            conflicts.append(path)
     if conflicts:
         joined = ", ".join(str(path) for path in conflicts)
         raise LectureUtilError(
@@ -272,9 +299,22 @@ def publish_lecture_notes(
     url: str,
     summary: str,
     transcript: str,
+    journal: Path | None = None,
 ) -> None:
-    ensure_paths_available(paths)
-    paths.summary.parent.mkdir(parents=True, exist_ok=True)
+    # Lock the existing lecture directory, never recreate a disappeared course.
+    if _lecture_directories(course.root) != [course.lectures]:
+        raise LectureUtilError(f"Course lecture directory changed: {course.root}")
+    with directory_lock(course.lectures):
+        _publish_locked(paths, course=course, lecture_date=lecture_date, title=title,
+                        url=url, summary=summary, transcript=transcript, journal=journal)
+
+
+def _publish_locked(
+    paths: PublishedLecturePaths, *, course: Course, lecture_date: str,
+    title: str, url: str, summary: str, transcript: str, journal: Path | None,
+) -> None:
+    ensure_paths_available(paths, journal=journal)
+    paths.summary.parent.mkdir(exist_ok=True)
     summary_note = _summary_note(
         course=course,
         lecture_date=lecture_date,
@@ -290,5 +330,41 @@ def publish_lecture_notes(
         summary_stem=paths.summary.stem,
         transcript=transcript,
     )
-    atomic_write_text(paths.summary, summary_note)
-    atomic_write_text(paths.transcript, transcript_note)
+    contents = {str(paths.summary): summary_note, str(paths.transcript): transcript_note}
+    previous = _publication_record(journal)
+    if previous.get("status") == "pending":
+        if set(previous["files"]) != set(contents):
+            raise LectureUtilError("Pending publication destinations changed; resume the original run.")
+        contents = {name: entry["content"] for name, entry in previous["files"].items()}
+    record = {"status": "pending", "files": {
+        name: {"content": content, "sha256": hashlib.sha256(content.encode()).hexdigest()}
+        for name, content in contents.items()
+    }}
+    if journal is not None:
+        atomic_write_json(journal, record)
+    for name, content in contents.items():
+        path = Path(name)
+        if path.exists():
+            if file_digest(path) != record["files"][name]["sha256"]:
+                raise LectureUtilError(f"Publication conflict: {path}")
+            continue
+        _create_note(path, content)
+    if journal is not None:
+        atomic_write_json(journal, {**record, "status": "complete"})
+
+
+def _create_note(path: Path, content: str) -> None:
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".lecture-util-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+    except OSError as error:
+        raise LectureUtilError(f"Could not exclusively publish {path}: {error}") from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

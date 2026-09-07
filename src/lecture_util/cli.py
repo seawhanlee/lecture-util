@@ -32,7 +32,7 @@ from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
 from lecture_util.progress import format_duration
-from lecture_util.state import RunState, create_workspace
+from lecture_util.state import RunState, create_workspace, lecture_id, workspace_lock
 from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import summary_stage
 from lecture_util.transcription import load_transcript
@@ -147,8 +147,12 @@ def _execute_run(
         title,
         semester_start=semester_start,
     )
-    ensure_paths_available(published)
     source = options.source or resolve_source(options.url)
+    journal = (
+        (cache_root or default_cache_root())
+        / f"lecture-{lecture_id(source.cache_key)}" / "publication.json"
+    )
+    ensure_paths_available(published, journal=journal)
     video = lecture_video_path(
         video_root or default_cache_root(),
         course,
@@ -195,6 +199,7 @@ def _execute_run(
             url=source.location,
             summary=paths.summary.read_text(encoding="utf-8"),
             transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
+            journal=journal,
         )
     console.print(
         Text.assemble(

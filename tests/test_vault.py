@@ -152,3 +152,42 @@ def test_video_path_uses_course_week_and_title(tmp_path: Path) -> None:
     assert path == (
         tmp_path / "videos" / "공기역학특론" / "2주차" / "압축성 유동.mp4"
     )
+
+
+def test_partial_publication_resumes_and_protects_edits(tmp_path, monkeypatch):
+    import lecture_util.vault as vault
+    create_course(tmp_path, 'Course')
+    course = resolve_course('Course', tmp_path)
+    paths = published_lecture_paths(course, '2026-09-04', 'Title')
+    journal = tmp_path / 'cache' / 'publication.json'
+    kwargs = dict(course=course, lecture_date='2026-09-04', title='Title',
+                  url='https://example.com/a.m3u8', summary='Summary', transcript='Words', journal=journal)
+    create = vault._create_note
+    def fail_second(path, content):
+        if path == paths.transcript:
+            raise OSError('disk full')
+        create(path, content)
+    monkeypatch.setattr(vault, '_create_note', fail_second)
+    with pytest.raises(OSError):
+        publish_lecture_notes(paths, **kwargs)
+    assert paths.summary.exists() and not paths.transcript.exists()
+    original = paths.summary.read_text()
+    paths.summary.write_text('user edit')
+    with pytest.raises(LectureUtilError, match='already exists'):
+        publish_lecture_notes(paths, **kwargs)
+    assert paths.summary.read_text() == 'user edit'
+    paths.summary.write_text(original)
+    monkeypatch.setattr(vault, '_create_note', create)
+    publish_lecture_notes(paths, **kwargs)
+    assert paths.transcript.exists()
+    with pytest.raises(LectureUtilError, match='already exists'):
+        publish_lecture_notes(paths, **kwargs)
+
+
+def test_exclusive_note_creation_does_not_replace(tmp_path):
+    from lecture_util.vault import _create_note
+    path = tmp_path / 'note.md'
+    path.write_text('user')
+    with pytest.raises(LectureUtilError):
+        _create_note(path, 'generated')
+    assert path.read_text() == 'user'

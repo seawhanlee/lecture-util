@@ -111,14 +111,14 @@ def test_local_cli_publication_and_conflict(tmp_path):
     with patch('lecture_util.cli.run_lecture', return_value=cached) as run, patch(
         'lecture_util.cli.CodexSummarizer'
     ), patch('lecture_util.cli.console', Console(file=output)):
-        _execute_run(selected, vault_root=vault)
+        _execute_run(selected, vault_root=vault, cache_root=tmp_path / "cache")
         assert run.call_args.kwargs['video_path'] is None
         assert str(media) in next(lecture_dir.rglob('*전사.md')).read_text()
         assert 'Downloading' not in output.getvalue()
         assert 'Video:' not in output.getvalue()
         run.reset_mock()
         with pytest.raises(LectureUtilError, match='already exists'):
-            _execute_run(selected, vault_root=vault)
+            _execute_run(selected, vault_root=vault, cache_root=tmp_path / "cache")
         run.assert_not_called()
     assert media.read_bytes() == b'original'
 

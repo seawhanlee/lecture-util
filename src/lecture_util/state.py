@@ -203,3 +203,18 @@ def create_workspace(
         }
         state.save()
     return paths, state
+
+@contextmanager
+def directory_lock(path: Path) -> Iterator[None]:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as error:
+        raise LectureUtilError(f"Lecture directory unavailable: {path}") from error
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise LectureUtilError(f"Another publication is using {path}.") from error
+        yield
+    finally:
+        os.close(descriptor)
