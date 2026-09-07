@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from textual.widgets import Input, Label, Select, TextArea
+from textual.widgets import Collapsible, Input, Label, Select, TextArea
 
 from lecture_util.configuration import AppConfig
 from lecture_util.summary import DEFAULT_PROMPT
@@ -187,7 +187,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(options.prompt, "한국어로 요약해")
 
-    async def test_enter_submits_even_when_select_is_focused(self) -> None:
+    async def test_ctrl_r_submits_even_when_select_is_focused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             vault = Path(directory)
             create_vault(vault)
@@ -198,7 +198,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 app.query_one("#lecture-title", Input).value = "강의개요"
                 app.query_one("#source", Input).value = URL
                 app.query_one("#course", Select).focus()
-                await pilot.press("enter")
+                await pilot.press("ctrl+r")
 
         options = app.return_value
         self.assertIsNotNone(options)
@@ -213,7 +213,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test(size=(100, 40)) as pilot:
                 app.query_one("#lecture-date", Input).value = ""
                 app.query_one("#source", Input).value = URL
-                await pilot.press("enter")
+                await pilot.press("ctrl+r")
                 await pilot.pause()
                 error = app.query_one("#error", Label)
                 self.assertTrue(error.display)
@@ -260,6 +260,81 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test(size=(100, 40)) as pilot:
                 await pilot.press("escape")
         self.assertIsNone(app.return_value)
+
+
+class TuiInteractionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_enter_selects_and_escape_only_closes_dropdown(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(120, 40)) as pilot:
+                course = app.query_one("#course", Select)
+                course.focus()
+                await pilot.press("enter")
+                self.assertTrue(course.expanded)
+                await pilot.press("escape")
+                self.assertFalse(course.expanded)
+                self.assertTrue(app.is_running)
+                await pilot.press("enter", "enter")
+                self.assertFalse(course.expanded)
+                self.assertTrue(app.is_running)
+
+    async def test_multiline_prompt_keeps_enter_and_space(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(120, 40)) as pilot:
+                for section in app.query(Collapsible):
+                    section.collapsed = False
+                app.query_one("#prompt-mode", Select).value = "inline"
+                await pilot.pause()
+                prompt = app.query_one("#inline-prompt", TextArea)
+                prompt.focus()
+                await pilot.press("a", "space", "b", "enter", "c")
+                self.assertEqual(prompt.text, "a b\nc")
+                self.assertTrue(app.is_running)
+
+    async def test_hidden_error_reveals_field_and_preserves_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(80, 24)) as pilot:
+                app.query_one("#source", Input).value = URL
+                app.query_one("#lecture-title", Input).value = "강의 [intro]"
+                app.query_one("#semester-start", Input).value = "wrong"
+                await pilot.press("ctrl+r")
+                await pilot.pause()
+                field = app.query_one("#semester-start", Input)
+                self.assertIs(app.focused, field)
+                self.assertTrue(field.has_class("invalid"))
+                self.assertTrue(all(not parent.collapsed for parent in field.ancestors
+                                    if isinstance(parent, Collapsible)))
+                self.assertEqual(app.value("lecture-title"), "강의 [intro]")
+                field.value = "2026-08-31"
+                await pilot.pause()
+                self.assertFalse(field.has_class("invalid"))
+
+    async def test_responsive_layout_and_live_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(120, 40)) as pilot:
+                app.query_one("#lecture-title", Input).value = "압축성 유동 [intro]" * 4
+                await pilot.pause()
+                form = app.query_one("#form")
+                preview = app.query_one("#preview")
+                self.assertGreater(preview.region.x, form.region.x)
+                self.assertIn("[intro]", str(app.query_one("#preview-content", Label).render()))
+                await pilot.resize_terminal(80, 24)
+                await pilot.pause()
+                self.assertGreater(preview.virtual_region.y, form.virtual_region.y)
+                run = app.query_one("#run")
+                self.assertLessEqual(run.region.bottom, 24)
+                self.assertLessEqual(run.region.right, 80)
 
 
 if __name__ == "__main__":

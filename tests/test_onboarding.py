@@ -119,3 +119,36 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("escape")
 
             self.assertIsNone(app.return_value)
+
+
+class OnboardingInteractionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_narrow_form_preview_and_save_shortcut(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            create_vault(vault)
+            app = OnboardingApp(initial_config(vault))
+            async with app.run_test(size=(80, 24)) as pilot:
+                field = app.query_one("#language", Input)
+                field.value = "ko"
+                await pilot.pause()
+                self.assertIn("Language: ko", str(app.query_one("#preview-content", Label).render()))
+                self.assertLessEqual(app.query_one("#save").region.bottom, 24)
+                self.assertLessEqual(app.query_one("#save").region.right, 80)
+                await pilot.press("ctrl+s")
+            self.assertEqual(app.return_value.language, "ko")
+
+    async def test_validation_moves_to_model_and_allows_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            create_vault(vault)
+            app = OnboardingApp(initial_config(vault))
+            async with app.run_test(size=(80, 24)) as pilot:
+                field = app.query_one("#whisper-model", Input)
+                field.value = ""
+                await pilot.press("ctrl+s")
+                await pilot.pause()
+                self.assertIs(app.focused, field)
+                self.assertTrue(field.has_class("invalid"))
+                field.value = "turbo"
+                await pilot.press("ctrl+s")
+            self.assertEqual(app.return_value.whisper_model, "turbo")

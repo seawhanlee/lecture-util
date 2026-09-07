@@ -4,16 +4,14 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
-from textual.app import App, ComposeResult
+from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
     Button,
     Checkbox,
     Collapsible,
     Input,
     Label,
-    OptionList,
     Select,
     TextArea,
 )
@@ -26,10 +24,12 @@ from lecture_util.configuration import (
     resolve_prompt,
 )
 from lecture_util.errors import LectureUtilError
+from lecture_util.form_ui import FormApp
 from lecture_util.models import RunOptions
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
     discover_courses,
+    lecture_week,
     ensure_paths_available,
     published_lecture_paths,
     resolve_course,
@@ -44,76 +44,13 @@ def _week_monday(today: date | None = None) -> str:
     return (current_date - timedelta(days=current_date.weekday())).isoformat()
 
 
-class LectureSetupApp(App[RunOptions]):
+class LectureSetupApp(FormApp[RunOptions]):
+    heading = "New lecture"
+    description = "Download, transcribe, and turn a lecture into study notes."
     BINDINGS = [
-        Binding("enter", "submit", "Run", priority=True),
-        Binding(
-            "space",
-            "select_option",
-            "Select option",
-            show=False,
-            priority=True,
-        ),
+        Binding("ctrl+r", "submit", "Run", priority=True),
         Binding("escape", "cancel", "Cancel"),
     ]
-    ENABLE_COMMAND_PALETTE = False
-
-    CSS = """
-    Screen {
-        background: $background;
-        align: center top;
-    }
-
-    #form {
-        width: 68;
-        max-width: 100%;
-        height: 1fr;
-        padding: 1 2 0 2;
-    }
-
-    #title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    .field-label {
-        margin-top: 1;
-    }
-
-    Input, Select {
-        width: 100%;
-    }
-
-    TextArea {
-        height: 5;
-        border: round $surface-lighten-2;
-    }
-
-    Collapsible {
-        margin-top: 1;
-        padding: 0;
-    }
-
-    #error {
-        display: none;
-        width: 68;
-        max-width: 100%;
-        padding: 0 2;
-        color: $error;
-    }
-
-    #actions {
-        width: 68;
-        max-width: 100%;
-        height: 3;
-        align-horizontal: right;
-        padding: 0 2;
-    }
-
-    #actions Button {
-        margin-left: 1;
-    }
-    """
 
     def __init__(
         self,
@@ -135,76 +72,73 @@ class LectureSetupApp(App[RunOptions]):
         self.vault_root = self.config.vault_root
         self.courses = discover_courses(self.vault_root)
 
-    def compose(self) -> ComposeResult:
+    def compose_fields(self) -> ComposeResult:
         lecture_date = _week_monday()
-        with VerticalScroll(id="form"):
-            yield Label("lecture-util", id="title")
-            yield Label("Course", classes="field-label")
-            yield Select(
-                tuple((course.name, course.name) for course in self.courses),
-                value=self.courses[0].name,
-                allow_blank=False,
-                type_to_search=False,
-                id="course",
+        yield Label("Course", classes="field-label")
+        yield Select(
+            tuple((course.name, course.name) for course in self.courses),
+            value=self.courses[0].name,
+            allow_blank=False,
+            type_to_search=False,
+            id="course",
+        )
+        yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
+        yield Input(value=lecture_date, id="lecture-date")
+        yield Label("Lecture title", classes="field-label")
+        yield Input(placeholder="압축성 유동", id="lecture-title")
+        yield Label("Public .m3u8 URL", classes="field-label")
+        yield Input(placeholder="https://example.com/lecture/index.m3u8", id="source")
+
+        with Collapsible(title="Lecture options", collapsed=True):
+            yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
+            yield Input(
+                value=self.config.semester_start,
+                id="semester-start",
             )
-            yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
-            yield Input(value=lecture_date, id="lecture-date")
-            yield Label("Lecture title", classes="field-label")
-            yield Input(placeholder="압축성 유동", id="lecture-title")
-            yield Label("Public .m3u8 URL", classes="field-label")
-            yield Input(placeholder="https://example.com/lecture/index.m3u8", id="source")
-
-            with Collapsible(title="Advanced settings", collapsed=True):
-                yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
-                yield Input(
-                    value=self.config.semester_start,
-                    id="semester-start",
-                )
-                yield Label("Tags (comma-separated, optional)", classes="field-label")
-                yield Input(placeholder="operating-systems, midterm", id="tags")
-                yield Checkbox("Force every stage to run again", id="force")
-                yield Label("Transcription device", classes="field-label")
-                yield Select(
-                    (
-                        ("Auto", "auto"),
-                        ("Apple MLX", "mlx"),
-                        ("NVIDIA CUDA", "cuda"),
-                        ("CPU", "cpu"),
-                    ),
-                    value=self.config.device,
-                    allow_blank=False,
-                    id="device",
-                )
-                yield Label("Whisper model", classes="field-label")
-                yield Input(value=self.config.whisper_model, id="whisper-model")
-                yield Label("Lecture language", classes="field-label")
-                yield Input(value=self.config.language, id="language")
-                yield Label("Codex model (blank uses configured default)", classes="field-label")
-                yield Input(value=self.config.llm_model or "", id="llm-model")
-                yield Label("Summary prompt", classes="field-label")
-                yield Select(
-                    (
-                        ("Default", "default"),
-                        ("Enter instructions", "inline"),
-                        ("Prompt file", "file"),
-                    ),
-                    value="default",
-                    allow_blank=False,
-                    id="prompt-mode",
-                )
-                yield TextArea(placeholder="Summary instructions", id="inline-prompt")
-                yield Input(placeholder="Path to prompt file", id="prompt-file")
-
-        yield Label("", id="error")
-        with Horizontal(id="actions"):
-            yield Button("Cancel", id="cancel")
-            yield Button("Run", id="run")
+            yield Label("Tags (comma-separated, optional)", classes="field-label")
+            yield Input(placeholder="operating-systems, midterm", id="tags")
+            yield Checkbox("Force every stage to run again", id="force")
+        with Collapsible(title="Transcription", collapsed=True):
+            yield Label("Transcription device", classes="field-label")
+            yield Select(
+                (
+                    ("Auto", "auto"),
+                    ("Apple MLX", "mlx"),
+                    ("NVIDIA CUDA", "cuda"),
+                    ("CPU", "cpu"),
+                ),
+                value=self.config.device,
+                allow_blank=False,
+                id="device",
+            )
+            yield Label("Whisper model", classes="field-label")
+            yield Input(value=self.config.whisper_model, id="whisper-model")
+            yield Label("Lecture language", classes="field-label")
+            yield Input(value=self.config.language, id="language")
+        with Collapsible(title="Summary", collapsed=True):
+            yield Label("Codex model (blank uses configured default)", classes="field-label")
+            yield Input(value=self.config.llm_model or "", id="llm-model")
+            yield Label("Summary prompt", classes="field-label")
+            yield Select(
+                (
+                    ("Default", "default"),
+                    ("Enter instructions", "inline"),
+                    ("Prompt file", "file"),
+                ),
+                value="default",
+                allow_blank=False,
+                id="prompt-mode",
+            )
+            yield TextArea(placeholder="Summary instructions", id="inline-prompt")
+            yield Input(placeholder="Path to prompt file", id="prompt-file")
 
     def on_mount(self) -> None:
+        super().on_mount()
         self._update_prompt_mode()
         self.query_one("#lecture-date", Input).focus()
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        super().on_select_changed(event)
         if event.select.id == "prompt-mode":
             self._update_prompt_mode()
 
@@ -214,25 +148,8 @@ class LectureSetupApp(App[RunOptions]):
         elif event.button.id == "run":
             self._submit()
 
-    def action_cancel(self) -> None:
-        self.exit()
-
     def action_submit(self) -> None:
         self._submit()
-
-    def action_select_option(self) -> None:
-        focused = self.focused
-        if isinstance(focused, OptionList):
-            focused.action_select()
-
-    def check_action(
-        self,
-        action: str,
-        parameters: tuple[object, ...],
-    ) -> bool | None:
-        if action == "select_option":
-            return isinstance(self.focused, OptionList)
-        return super().check_action(action, parameters)
 
     def _select_value(self, selector: str) -> str:
         return cast(str, self.query_one(selector, Select).value)
@@ -242,32 +159,72 @@ class LectureSetupApp(App[RunOptions]):
         self.query_one("#inline-prompt", TextArea).display = mode == "inline"
         self.query_one("#prompt-file", Input).display = mode == "file"
 
+    def refresh_preview(self) -> None:
+        course = self._select_value("#course")
+        title = self.value("lecture-title") or "Untitled lecture"
+        lecture_date = self.value("lecture-date") or "Choose a date"
+        destination = "Complete the date and title to preview the note path."
+        try:
+            paths = published_lecture_paths(
+                next(item for item in self.courses if item.name == course),
+                validate_lecture_date(self.value("lecture-date")),
+                validate_title(self.value("lecture-title")),
+                semester_start=validate_semester_start(self.value("semester-start")),
+            )
+            destination = str(paths.summary)
+        except (LectureUtilError, StopIteration):
+            pass
+        mode = self._select_value("#prompt-mode")
+        prompt = {
+            "default": "Default instructions",
+            "inline": "Custom instructions",
+            "file": "Prompt file",
+        }[mode]
+        rerun = (
+            "Re-run every stage" if self.query_one("#force", Checkbox).value
+            else "Reuse cached stages"
+        )
+        whisper_model = self.value("whisper-model") or "Choose a model"
+        self.query_one("#preview-content", Label).update(
+            f"{course}\n{lecture_date}\n{title}\n\n"
+            f"NOTE DESTINATION\n{destination}\n\n"
+            f"TRANSCRIPTION\n{self._select_value('#device')} · {whisper_model}"
+            f"\nLanguage: {self.value('language') or 'Choose a language'}\n\n"
+            f"SUMMARY\n{self.value('llm-model') or 'Codex default'}\n{prompt}\n\n{rerun}"
+        )
+
     def _submit(self) -> None:
         error_label = self.query_one("#error", Label)
         try:
             options = self._build_options()
         except LectureUtilError as error:
-            error_label.update(str(error))
-            error_label.display = True
+            self.show_error(error)
             return
         error_label.display = False
         self.exit(options)
 
     def _build_options(self) -> RunOptions:
+        self.error_field = "source"
         source_value = self.query_one("#source", Input).value.strip()
         if not source_value:
             raise LectureUtilError("Enter a lecture URL.")
         url = read_urls(source_value, None)[0]
 
+        self.error_field = "lecture-date"
         lecture_date = validate_lecture_date(
             self.query_one("#lecture-date", Input).value
         )
+        self.error_field = "semester-start"
         semester_start = validate_semester_start(
             self.query_one("#semester-start", Input).value
         )
+        self.error_field = "lecture-title"
         title = validate_title(self.query_one("#lecture-title", Input).value)
+        self.error_field = "course"
         course_name = self._select_value("#course")
         course = resolve_course(course_name, self.vault_root)
+        self.checked("lecture-date", lambda: lecture_week(lecture_date, semester_start))
+        self.error_field = "lecture-title"
         ensure_paths_available(
             published_lecture_paths(
                 course,
@@ -277,10 +234,13 @@ class LectureSetupApp(App[RunOptions]):
             )
         )
 
+        self.error_field = "prompt-mode"
         prompt_mode = self._select_value("#prompt-mode")
         if prompt_mode == "inline":
+            self.error_field = "inline-prompt"
             prompt = resolve_prompt(self.query_one("#inline-prompt", TextArea).text.strip(), None)
         elif prompt_mode == "file":
+            self.error_field = "prompt-file"
             prompt_path = self.query_one("#prompt-file", Input).value.strip()
             if not prompt_path:
                 raise LectureUtilError("Enter a summary prompt file.")
@@ -288,9 +248,11 @@ class LectureSetupApp(App[RunOptions]):
         else:
             prompt = resolve_prompt(None, None)
 
+        self.error_field = "whisper-model"
         whisper_model = self.query_one("#whisper-model", Input).value.strip()
         if not whisper_model:
             raise LectureUtilError("Enter a Whisper model.")
+        self.error_field = "language"
         language = self.query_one("#language", Input).value.strip()
         if not language:
             raise LectureUtilError("Enter a lecture language.")

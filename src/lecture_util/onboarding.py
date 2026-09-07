@@ -4,11 +4,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
-from textual.app import App, ComposeResult
+from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, OptionList, Select
+from textual.widgets import Button, Input, Label, Select
 
 from lecture_util.configuration import (
     AppConfig,
@@ -17,6 +17,8 @@ from lecture_util.configuration import (
     video_root_is_in_vault,
 )
 from lecture_util.errors import LectureUtilError
+from lecture_util.form_ui import FormApp
+from lecture_util.vault import discover_courses, validate_semester_start
 
 
 DEVICE_OPTIONS = (
@@ -29,7 +31,7 @@ DEVICE_OPTIONS = (
 
 class ConfirmVaultVideoScreen(ModalScreen[bool]):
     BINDINGS = [
-        Binding("enter", "confirm", "Store videos in Vault", priority=True),
+        Binding("ctrl+s", "confirm", "Store videos in Vault", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
     ]
 
@@ -40,6 +42,7 @@ class ConfirmVaultVideoScreen(ModalScreen[bool]):
 
     #confirm-dialog {
         width: 64;
+        max-width: 100%;
         height: auto;
         padding: 1 2;
         border: round $warning;
@@ -71,6 +74,7 @@ class ConfirmVaultVideoScreen(ModalScreen[bool]):
                 f"Video files under {self.video_root} may be indexed or synced "
                 "by Obsidian. Save this location anyway?",
                 id="confirm-question",
+                markup=False,
             )
             with Horizontal(id="confirm-actions"):
                 yield Button("Go back", id="cancel-video-root")
@@ -86,106 +90,47 @@ class ConfirmVaultVideoScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class OnboardingApp(App[AppConfig]):
+class OnboardingApp(FormApp[AppConfig]):
+    heading = "Set up lecture-util"
+    description = "Choose where lectures live and how they are processed."
+    submit_id = "save"
+    submit_label = "Save settings"
+    shortcut = "Ctrl+S"
     BINDINGS = [
-        Binding("enter", "submit", "Save", priority=True),
-        Binding("space", "select_option", "Select option", show=False, priority=True),
+        Binding("ctrl+s", "submit", "Save", priority=True),
         Binding("escape", "cancel", "Cancel"),
     ]
-    ENABLE_COMMAND_PALETTE = False
-
-    CSS = """
-    Screen {
-        background: $background;
-        align: center top;
-    }
-
-    #form {
-        width: 68;
-        max-width: 100%;
-        height: 1fr;
-        padding: 1 2 0 2;
-    }
-
-    #title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #description {
-        margin-bottom: 1;
-        color: $text-muted;
-    }
-
-    .field-label {
-        margin-top: 1;
-    }
-
-    Input, Select {
-        width: 100%;
-    }
-
-    #error {
-        display: none;
-        width: 68;
-        max-width: 100%;
-        padding: 0 2;
-        color: $error;
-    }
-
-    #actions {
-        width: 68;
-        max-width: 100%;
-        height: 3;
-        align-horizontal: right;
-        padding: 0 2;
-    }
-
-    #actions Button {
-        margin-left: 1;
-    }
-    """
 
     def __init__(self, initial: AppConfig | None = None) -> None:
         super().__init__()
         self.initial = initial or default_app_config()
 
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="form"):
-            yield Label("Set up lecture-util", id="title")
-            yield Label(
-                "Choose the defaults used when publishing lectures.",
-                id="description",
-            )
-            yield Label("Obsidian Vault path", classes="field-label")
-            yield Input(value=str(self.initial.vault_root), id="vault-root")
-            yield Label("Video storage path", classes="field-label")
-            yield Input(value=str(self.initial.video_root), id="video-root")
-            yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
-            yield Input(value=self.initial.semester_start, id="semester-start")
-            yield Label("Transcription device", classes="field-label")
-            yield Select(
-                DEVICE_OPTIONS,
-                value=self.initial.device,
-                allow_blank=False,
-                id="device",
-            )
-            yield Label("Whisper model", classes="field-label")
-            yield Input(value=self.initial.whisper_model, id="whisper-model")
-            yield Label("Lecture language", classes="field-label")
-            yield Input(value=self.initial.language, id="language")
-            yield Label(
-                "Codex model (blank uses Codex configured default)",
-                classes="field-label",
-            )
-            yield Input(value=self.initial.llm_model or "", id="llm-model")
-
-        yield Label("", id="error")
-        with Horizontal(id="actions"):
-            yield Button("Cancel", id="cancel")
-            yield Button("Save", id="save")
+    def compose_fields(self) -> ComposeResult:
+        yield Label("Obsidian Vault path", classes="field-label")
+        yield Input(value=str(self.initial.vault_root), id="vault-root")
+        yield Label("Video storage path", classes="field-label")
+        yield Input(value=str(self.initial.video_root), id="video-root")
+        yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
+        yield Input(value=self.initial.semester_start, id="semester-start")
+        yield Label("Transcription device", classes="field-label")
+        yield Select(
+            DEVICE_OPTIONS,
+            value=self.initial.device,
+            allow_blank=False,
+            id="device",
+        )
+        yield Label("Whisper model", classes="field-label")
+        yield Input(value=self.initial.whisper_model, id="whisper-model")
+        yield Label("Lecture language", classes="field-label")
+        yield Input(value=self.initial.language, id="language")
+        yield Label(
+            "Codex model (blank uses Codex configured default)",
+            classes="field-label",
+        )
+        yield Input(value=self.initial.llm_model or "", id="llm-model")
 
     def on_mount(self) -> None:
+        super().on_mount()
         self.query_one("#vault-root", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -194,33 +139,26 @@ class OnboardingApp(App[AppConfig]):
         elif event.button.id == "save":
             self._submit()
 
-    def action_cancel(self) -> None:
-        self.exit()
-
     def action_submit(self) -> None:
         self._submit()
 
-    def action_select_option(self) -> None:
-        focused = self.focused
-        if isinstance(focused, OptionList):
-            focused.action_select()
-
-    def check_action(
-        self,
-        action: str,
-        parameters: tuple[object, ...],
-    ) -> bool | None:
-        if action == "select_option":
-            return isinstance(self.focused, OptionList)
-        return super().check_action(action, parameters)
+    def refresh_preview(self) -> None:
+        device = self.query_one("#device", Select).value
+        self.query_one("#preview-content", Label).update(
+            f"STORAGE\nVault\n{self.value('vault-root') or 'Choose a Vault'}"
+            f"\n\nVideos\n{self.value('video-root') or 'Choose a folder'}"
+            f"\n\nSEMESTER START\n{self.value('semester-start') or 'Choose a date'}"
+            f"\n\nTRANSCRIPTION\n{device} · {self.value('whisper-model') or 'Choose a model'}"
+            f"\nLanguage: {self.value('language') or 'Choose a language'}"
+            f"\n\nSUMMARY\n{self.value('llm-model') or 'Codex default'}"
+        )
 
     def _submit(self) -> None:
         error_label = self.query_one("#error", Label)
         try:
             config = self._build_config()
         except LectureUtilError as error:
-            error_label.update(str(error))
-            error_label.display = True
+            self.show_error(error)
             return
         error_label.display = False
         if video_root_is_in_vault(config):
@@ -236,12 +174,23 @@ class OnboardingApp(App[AppConfig]):
             self.exit(replace(config, video_in_vault_allowed=True))
 
     def _build_config(self) -> AppConfig:
+        self.error_field = "vault-root"
         vault_value = self.query_one("#vault-root", Input).value.strip()
         if not vault_value:
             raise LectureUtilError("Enter an Obsidian Vault path.")
+        self.checked("vault-root", lambda: discover_courses(Path(vault_value).expanduser()))
+        self.error_field = "video-root"
         video_value = self.query_one("#video-root", Input).value.strip()
         if not video_value:
             raise LectureUtilError("Enter a video storage path.")
+        if Path(video_value).expanduser().exists() and not Path(video_value).expanduser().is_dir():
+            raise LectureUtilError("Video storage path is not a directory.")
+        self.checked("semester-start", lambda: validate_semester_start(self.value("semester-start")))
+        for field, label in (("whisper-model", "Whisper model"), ("language", "lecture language")):
+            self.error_field = field
+            if not self.value(field):
+                raise LectureUtilError(f"Configured {label} must not be empty.")
+        self.error_field = "device"
         device = cast(str, self.query_one("#device", Select).value)
         return validate_app_config(
             AppConfig(
