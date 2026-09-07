@@ -17,7 +17,7 @@ from lecture_util.configuration import (
     video_root_is_in_vault,
 )
 from lecture_util.errors import LectureUtilError
-from lecture_util.form_ui import CodexModelPicker, FormApp
+from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionTuning
 from lecture_util.vault import discover_courses, validate_semester_start
 
 
@@ -123,6 +123,7 @@ class OnboardingApp(FormApp[AppConfig]):
         yield Input(value=self.initial.whisper_model, id="whisper-model")
         yield Label("Lecture language", classes="field-label")
         yield Input(value=self.initial.language, id="language")
+        yield TranscriptionTuning(self.initial.compute_type, self.initial.batch_size, self.initial.beam_size)
         yield CodexModelPicker(self.initial.llm_model, self.initial.reasoning_effort)
 
     def on_mount(self) -> None:
@@ -194,6 +195,7 @@ class OnboardingApp(FormApp[AppConfig]):
                 vault_root=Path(vault_value),
                 video_root=Path(video_value),
                 semester_start=self.query_one("#semester-start", Input).value,
+                **self.query_one(TranscriptionTuning).values(),
                 whisper_model=self.query_one("#whisper-model", Input).value,
                 language=self.query_one("#language", Input).value,
                 device=device,

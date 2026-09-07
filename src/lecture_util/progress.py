@@ -13,6 +13,10 @@ class ProgressEvent:
     stage: str
     status: ProgressStatus
     message: str
+    processed_seconds: float | None = None
+    total_seconds: float | None = None
+    elapsed_seconds: float | None = None
+    phase: str | None = None
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
@@ -23,9 +27,13 @@ def report(
     stage: str,
     status: ProgressStatus,
     message: str,
+    *, processed_seconds: float | None = None, total_seconds: float | None = None,
+    elapsed_seconds: float | None = None, phase: str | None = None,
 ) -> None:
     if callback is not None:
-        callback(ProgressEvent(stage=stage, status=status, message=message))
+        callback(ProgressEvent(stage=stage, status=status, message=message,
+                               processed_seconds=processed_seconds, total_seconds=total_seconds,
+                               elapsed_seconds=elapsed_seconds, phase=phase))
 
 
 def format_duration(seconds: float) -> str:

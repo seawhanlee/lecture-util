@@ -176,3 +176,13 @@ def test_transcription_options_roundtrip_and_legacy_defaults(tmp_path):
     path.write_text(json.dumps(data))
     config = load_config(path)
     assert (config.compute_type, config.batch_size, config.beam_size) == ('auto', 0, None)
+
+
+@pytest.mark.parametrize('changes', [dict(language='korean'), dict(batch_size=-1),
+                                     dict(beam_size=0), dict(batch_size=True),
+                                     dict(device='mlx', compute_type='int8')])
+def test_invalid_transcription_tuning_is_rejected(changes):
+    from lecture_util.models import TranscriptionOptions
+    from lecture_util.configuration import validate_transcription_options
+    with pytest.raises(LectureUtilError):
+        validate_transcription_options(TranscriptionOptions(**changes))

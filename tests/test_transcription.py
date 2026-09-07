@@ -160,3 +160,55 @@ class TranscriptionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_batched_transcription_forwards_tuning_and_progress(tmp_path):
+    model = MagicMock()
+    runner = MagicMock()
+    runner.transcribe.return_value = (iter([SimpleNamespace(start=0, end=2, text='hello')]),
+                                     SimpleNamespace(duration=4, language='en'))
+    module = SimpleNamespace(WhisperModel=MagicMock(return_value=model),
+                             BatchedInferencePipeline=MagicMock(return_value=runner))
+    events = []
+    with patch('lecture_util.transcription._module', return_value=module):
+        result = _transcribe_faster(tmp_path / 'audio.wav', 'turbo', 'en', 'cpu',
+                                   compute_type='int8', batch_size=4, beam_size=1,
+                                   progress=events.append)
+    assert runner.transcribe.call_args.kwargs['batch_size'] == 4
+    assert runner.transcribe.call_args.kwargs['beam_size'] == 1
+    assert result[0][0].text == 'hello'
+    assert events[-1].processed_seconds == 2
+    assert events[-1].total_seconds == 4
+
+
+def test_oom_traceback_is_released_before_retry(tmp_path):
+    import weakref
+    audio = tmp_path / 'audio.wav'
+    audio.touch()
+    references = []
+    class Allocated:
+        pass
+    def backend(_audio, model, _language, _device):
+        if model == 'large-v3':
+            allocated = Allocated()
+            references.append(weakref.ref(allocated))
+            raise MemoryError('allocation')
+        assert references[0]() is None
+        return [], 'ko', 1
+    with (patch('lecture_util.transcription.detect_device', return_value='cpu'),
+          patch('lecture_util.transcription._transcribe_faster', side_effect=backend)):
+        assert transcribe_audio(audio).effective_model == 'turbo'
+
+
+def test_metal_command_error_is_not_assumed_to_be_oom():
+    assert not is_out_of_memory(RuntimeError('metal command buffer failed'))
+
+
+def test_preflight_rejects_unsupported_compute_without_model_loading():
+    import pytest
+    from lecture_util.models import TranscriptionOptions
+    from lecture_util.transcription import preflight_transcription
+    module = SimpleNamespace(get_supported_compute_types=lambda _: {'int8', 'float32'})
+    with (patch('lecture_util.transcription._module', return_value=module),
+          pytest.raises(DependencyError, match='unsupported')):
+        preflight_transcription(TranscriptionOptions(device='cpu', compute_type='float16'))

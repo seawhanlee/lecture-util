@@ -23,8 +23,11 @@ from lecture_util.configuration import (
     resolve_prompt,
 )
 from lecture_util.errors import LectureUtilError
-from lecture_util.form_ui import CodexModelPicker, FormApp
-from lecture_util.models import RunOptions
+from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionTuning
+from lecture_util.models import RunOptions, TranscriptionOptions
+from lecture_util.configuration import validate_transcription_options
+from lecture_util.state import lecture_id
+from lecture_util.vault import default_cache_root
 from lecture_util.media import resolve_source
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
@@ -86,6 +89,7 @@ class LectureSetupApp(FormApp[RunOptions]):
         )
         yield Label("Lecture date (YYYY-MM-DD)", classes="field-label")
         yield Input(value=lecture_date, id="lecture-date")
+        yield Label("Default: Monday of the current week; edit for the actual lecture date.", markup=False)
         yield Label("Lecture title", classes="field-label")
         yield Input(placeholder="압축성 유동", id="lecture-title")
         yield Label("HLS URL or local media path", classes="field-label")
@@ -122,6 +126,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             yield Input(value=self.config.whisper_model, id="whisper-model")
             yield Label("Lecture language", classes="field-label")
             yield Input(value=self.config.language, id="language")
+            yield TranscriptionTuning(self.config.compute_type, self.config.batch_size, self.config.beam_size)
         with Collapsible(title="Summary", collapsed=True):
             yield CodexModelPicker(self.config.llm_model, self.config.reasoning_effort)
             yield Label("Summary prompt", classes="field-label")
@@ -270,7 +275,8 @@ class LectureSetupApp(FormApp[RunOptions]):
                 lecture_date,
                 title,
                 semester_start=semester_start,
-            )
+            ),
+            journal=default_cache_root() / f"lecture-{lecture_id(source.cache_key)}" / "publication.json",
         )
 
         self.error_field = "prompt-mode"
@@ -296,6 +302,11 @@ class LectureSetupApp(FormApp[RunOptions]):
         if not language:
             raise LectureUtilError("Enter a lecture language.")
 
+        tuning = self.query_one(TranscriptionTuning).values()
+        self.error_field = "language"
+        validate_transcription_options(TranscriptionOptions(
+            whisper_model, language, self._select_value("#device"), **tuning,
+        ))
         raw_tags = self.query_one("#tags", Input).value.strip()
         llm_model = self.selected_model()
         return RunOptions(
@@ -308,6 +319,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             llm_model=llm_model,
             reasoning_effort=self.validated_effort(),
             tags=normalize_tags([raw_tags] if raw_tags else None),
+            **tuning,
             whisper_model=whisper_model,
             language=language,
             device=self._select_value("#device"),

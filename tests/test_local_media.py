@@ -59,7 +59,8 @@ def test_missing_file(tmp_path):
 
 
 @pytest.mark.parametrize('video', [False, True])
-def test_local_pipeline_real_ffmpeg(tmp_path, video):
+@patch("lecture_util.pipeline.preflight_transcription")
+def test_local_pipeline_real_ffmpeg(preflight, tmp_path, video):
     if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
         pytest.skip('FFmpeg tools unavailable')
     media = tmp_path / ('강의 영상.mp4' if video else '강의 녹음.wav')
@@ -161,7 +162,8 @@ def test_cli_run_and_bare_path(tmp_path):
             assert prompt.call_args.args[0] == str(media)
 
 
-def test_retry_after_audio_failure(tmp_path):
+@patch("lecture_util.pipeline.preflight_transcription")
+def test_retry_after_audio_failure(preflight, tmp_path):
     from lecture_util.models import LectureSource
     media = tmp_path / 'source.wav'
     media.write_bytes(b'original')

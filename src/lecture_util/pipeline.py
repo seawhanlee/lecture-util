@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 from time import monotonic
 
 from lecture_util.errors import LectureUtilError
 from lecture_util.media import download_hls, extract_audio, resolve_source, tool_version
-from lecture_util.models import LecturePaths, LectureSource, Transcript
+from lecture_util.models import LecturePaths, LectureSource, Transcript, TranscriptionOptions
 from lecture_util.progress import ProgressCallback, format_duration, format_size, report
 from lecture_util.state import RunState, create_workspace, file_digest
 from lecture_util.summarizers import Summarizer
 from lecture_util.summary import DEFAULT_PROMPT, summary_stage
-from lecture_util.transcription import save_transcript, transcribe_audio
+from lecture_util.transcription import save_transcript, transcribe_audio, preflight_transcription
 
 
 def download_stage(
@@ -124,23 +125,15 @@ def transcription_stage(
     model: str = "large-v3",
     language: str = "auto",
     device: str = "auto",
+    compute_type: str = "auto", batch_size: int = 0, beam_size: int | None = None,
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> Transcript:
+    from lecture_util.configuration import validate_transcription_options
+    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size)
+    validate_transcription_options(options)
     source_digest = file_digest(paths.audio)
-    previous = state.data.get("stages", {}).get("transcription", {})
-    same_options = (
-        previous.get("requested_model") == model
-        and previous.get("requested_language") == language
-        and previous.get("requested_device") == device
-    )
-    if (
-        not force
-        and state.stage_complete("transcription")
-        and same_options
-        and previous.get("input_sha256") == source_digest
-        and paths.transcript_json.is_file()
-    ):
+    if not force and transcription_cached(paths, state, options):
         from lecture_util.transcription import load_transcript
 
         transcript = load_transcript(paths.transcript_json)
@@ -163,12 +156,15 @@ def transcription_stage(
     state.start_stage(
         "transcription",
         input_sha256=source_digest,
+        options=options.to_dict(), backend_platform=backend_platform(),
         requested_model=model,
         requested_language=language,
         requested_device=device,
     )
     try:
-        transcript = transcribe_audio(paths.audio, model=model, language=language, device=device)
+        transcript = transcribe_audio(paths.audio, model=model, language=language, device=device,
+                                      compute_type=compute_type, batch_size=batch_size,
+                                      beam_size=beam_size, progress=progress)
         save_transcript(
             transcript,
             paths.transcript_json,
@@ -187,6 +183,8 @@ def transcription_stage(
     state.complete_stage(
         "transcription",
         engine=transcript.engine,
+        effective_options=transcript.effective_options,
+        sha256=file_digest(paths.transcript_json),
         requested_model=transcript.requested_model,
         effective_model=transcript.effective_model,
         fallback_reason=transcript.fallback_reason,
@@ -225,6 +223,7 @@ def prepare_lecture(
     model: str = "large-v3",
     language: str = "auto",
     device: str = "auto",
+    compute_type: str = "auto", batch_size: int = 0, beam_size: int | None = None,
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> tuple[LecturePaths, RunState, Transcript]:
@@ -241,6 +240,19 @@ def prepare_lecture(
         published_transcript=published_transcript,
         tags=tags,
     )
+    from lecture_util.configuration import validate_transcription_options
+    from lecture_util.media import require_executable
+    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size)
+    validate_transcription_options(options)
+    if force or not transcription_cached(paths, state, options):
+        preflight_transcription(options)
+    if source.kind == "hls" and (
+        force or not state.stage_complete("download") or not paths.video.is_file()
+    ):
+        require_executable("yt-dlp")
+        require_executable("ffmpeg")
+    if force or not state.stage_complete("audio") or not paths.audio.is_file():
+        require_executable("ffmpeg")
     if source.kind == "hls":
         download_stage(paths, state, force=force, progress=progress)
     audio_stage(paths, state, force=force, progress=progress)
@@ -250,6 +262,7 @@ def prepare_lecture(
         model=model,
         language=language,
         device=device,
+        compute_type=compute_type, batch_size=batch_size, beam_size=beam_size,
         force=force,
         progress=progress,
     )
@@ -272,6 +285,7 @@ def run_lecture(
     model: str = "large-v3",
     language: str = "auto",
     device: str = "auto",
+    compute_type: str = "auto", batch_size: int = 0, beam_size: int | None = None,
     prompt: str = DEFAULT_PROMPT,
     force: bool = False,
     progress: ProgressCallback | None = None,
@@ -290,6 +304,7 @@ def run_lecture(
         model=model,
         language=language,
         device=device,
+        compute_type=compute_type, batch_size=batch_size, beam_size=beam_size,
         force=force,
         progress=progress,
     )
@@ -304,3 +319,18 @@ def run_lecture(
         progress=progress,
     )
     return paths
+
+
+def backend_platform() -> str:
+    return f"{platform.system()}:{platform.machine().lower()}"
+
+
+def transcription_cached(paths: LecturePaths, state: RunState, options: TranscriptionOptions) -> bool:
+    stage = state.data.get("stages", {}).get("transcription", {})
+    return bool(
+        stage.get("status") == "complete"
+        and stage.get("options") == options.to_dict()
+        and stage.get("backend_platform") == backend_platform()
+        and paths.audio.is_file() and paths.transcript_json.is_file()
+        and stage.get("input_sha256") == file_digest(paths.audio)
+    )

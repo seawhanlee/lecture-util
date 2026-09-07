@@ -28,6 +28,7 @@ class ConsoleProgressReporter:
         self.latest = "Preparing lecture processing"
         self.started = monotonic()
         self.live: Live | None = None
+        self.last_update: dict[str, float] = {}
         self.spinner = Spinner("dots", style="cyan")
 
     def __enter__(self) -> ConsoleProgressReporter:
@@ -67,7 +68,21 @@ class ConsoleProgressReporter:
             self.live = None
 
     def __call__(self, event: ProgressEvent) -> None:
+        now = monotonic()
+        previous = self.events.get(event.stage)
+        interval = 0.5 if self.live is not None else 10.0
+        if (event.status == "update" and previous is not None
+                and previous.status == "update" and previous.phase == event.phase
+                and now - self.last_update.get(event.stage, 0) < interval):
+            return
+        self.last_update[event.stage] = now
         self.latest = event.message
+        if event.processed_seconds is not None and event.total_seconds:
+            percent = min(100, 100 * event.processed_seconds / event.total_seconds)
+            self.latest += (f" · ~{percent:.0f}% "
+                            f"({format_duration(event.processed_seconds)}/{format_duration(event.total_seconds)})")
+            if event.elapsed_seconds:
+                self.latest += f" · {event.processed_seconds / event.elapsed_seconds:.1f}× audio/wall time"
         if event.status == "warning":
             if event.message not in self.warnings:
                 self.warnings.append(event.message)
@@ -83,7 +98,7 @@ class ConsoleProgressReporter:
         }[event.status]
         prefix = (f"[{self.stages.index(event.stage) + 1}/{len(self.stages)}] "
                   if event.stage in self.stages else "")
-        self.console.print(Text(f"{marker} {prefix}{event.message}", style=style))
+        self.console.print(Text(f"{marker} {prefix}{self.latest}", style=style))
 
     def render(self) -> Panel:
         table = Table.grid(padding=(0, 2), expand=True)

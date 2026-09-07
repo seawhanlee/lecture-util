@@ -192,6 +192,9 @@ class FormApp(App[T]):
         self._changed(event.input)
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "device" and self.is_mounted:
+            for tuning in self.query(TranscriptionTuning):
+                tuning.set_device(str(event.select.value))
         self._changed(event.select)
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
@@ -250,3 +253,47 @@ class FormApp(App[T]):
                 select.focus()
                 return
         self.exit()
+
+
+class TranscriptionTuning(Vertical):
+    DEFAULT_CSS = "TranscriptionTuning { height: auto; }"
+
+    def __init__(self, compute_type: str = "auto", batch_size: int = 0,
+                 beam_size: int | None = None) -> None:
+        super().__init__()
+        self.initial = (compute_type, batch_size, beam_size)
+
+    def compose(self) -> ComposeResult:
+        from lecture_util.configuration import COMPUTE_TYPES
+        compute, batch, beam = self.initial
+        yield Label("Compute type", classes="field-label")
+        yield Select([(item, item) for item in COMPUTE_TYPES], value=compute,
+                     allow_blank=False, id="compute-type")
+        yield Label("Batch size (0: disabled)", classes="field-label")
+        yield Input(value=str(batch), id="batch-size", type="integer")
+        yield Label("Beam size (blank: backend default)", classes="field-label")
+        yield Input(value=str(beam) if beam is not None else "", id="beam-size", type="integer")
+        yield Label("Tuning applies to faster-whisper; MLX uses its defaults.", markup=False)
+
+    def set_device(self, device: str) -> None:
+        for widget in self.query("Select, Input"):
+            widget.disabled = device == "mlx"
+        if device == "mlx":
+            self.query_one("#compute-type", Select).value = "auto"
+            self.query_one("#batch-size", Input).value = "0"
+            self.query_one("#beam-size", Input).value = ""
+
+    def values(self) -> dict:
+        try:
+            batch = int(self.query_one("#batch-size", Input).value)
+        except ValueError as error:
+            self.app.error_field = "batch-size"
+            raise LectureUtilError("Batch size must be a non-negative integer.") from error
+        try:
+            raw = self.query_one("#beam-size", Input).value.strip()
+            beam = int(raw) if raw else None
+        except ValueError as error:
+            self.app.error_field = "beam-size"
+            raise LectureUtilError("Beam size must be a positive integer or blank.") from error
+        return dict(compute_type=self.query_one("#compute-type", Select).value,
+                    batch_size=batch, beam_size=beam)

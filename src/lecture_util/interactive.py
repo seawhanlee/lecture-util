@@ -114,5 +114,6 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
         semester_start=config.semester_start, llm_model=config.llm_model,
         reasoning_effort=config.reasoning_effort, tags=None,
         whisper_model=config.whisper_model, language=config.language,
+        compute_type=config.compute_type, batch_size=config.batch_size, beam_size=config.beam_size,
         device=config.device, prompt=DEFAULT_PROMPT, force=False,
     )

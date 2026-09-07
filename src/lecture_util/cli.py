@@ -187,6 +187,7 @@ def _execute_run(
             model=options.whisper_model,
             language=options.language,
             device=options.device,
+            compute_type=options.compute_type, batch_size=options.batch_size, beam_size=options.beam_size,
             prompt=options.prompt,
             force=options.force,
             progress=progress,
@@ -322,6 +323,9 @@ def run_command(
     ),
     prompt: str | None = typer.Option(None, "--prompt"),
     prompt_file: Path | None = typer.Option(None, "--prompt-file", dir_okay=False),
+    compute_type: str | None = typer.Option(None, "--compute-type", help="auto/float16/float32/int8/int8_float16"),
+    batch_size: int | None = typer.Option(None, "--batch-size", min=0, help="0 disables batching"),
+    beam_size: int | None = typer.Option(None, "--beam-size", min=1),
     force: bool = typer.Option(False, "--force"),
     video_only: bool = typer.Option(False, "--video-only", help="Download video without audio extraction or notes"),
 ) -> None:
@@ -354,9 +358,12 @@ def run_command(
                 reasoning_effort=(config.reasoning_effort if reasoning_effort is None
                                   else reasoning_effort.strip() or None),
                 tags=normalize_tags(tag),
-                whisper_model=whisper_model or config.whisper_model,
-                language=language or config.language,
-                device=device or config.device,
+                whisper_model=config.whisper_model if whisper_model is None else whisper_model,
+                compute_type=config.compute_type if compute_type is None else compute_type,
+                batch_size=config.batch_size if batch_size is None else batch_size,
+                beam_size=config.beam_size if beam_size is None else beam_size,
+                language=config.language if language is None else language,
+                device=config.device if device is None else device,
                 prompt=selected_prompt,
                 force=force,
             ),
@@ -446,6 +453,9 @@ def transcribe_command(
     model: str | None = typer.Option(None, "--whisper-model"),
     language: str | None = typer.Option(None, "--language"),
     device: str | None = typer.Option(None, "--device"),
+    compute_type: str | None = typer.Option(None, "--compute-type", help="auto/float16/float32/int8/int8_float16"),
+    batch_size: int | None = typer.Option(None, "--batch-size", min=0, help="0 disables batching"),
+    beam_size: int | None = typer.Option(None, "--beam-size", min=1),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     """Transcribe an already downloaded lecture."""
@@ -461,6 +471,9 @@ def transcribe_command(
                 model=model if model is not None else config.whisper_model,
                 language=language if language is not None else config.language,
                 device=device if device is not None else config.device,
+                compute_type=config.compute_type if compute_type is None else compute_type,
+                batch_size=config.batch_size if batch_size is None else batch_size,
+                beam_size=config.beam_size if beam_size is None else beam_size,
                 force=force,
                 progress=progress,
             )

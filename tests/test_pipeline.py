@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lecture_util.errors import LectureUtilError
-from lecture_util.models import Segment, Transcript
+from lecture_util.models import Segment, Transcript, TranscriptionOptions
+from lecture_util.pipeline import backend_platform
 from lecture_util.pipeline import audio_stage, download_stage, transcription_stage
 from lecture_util.progress import ProgressEvent
 from lecture_util.state import create_workspace, file_digest
@@ -133,7 +134,8 @@ class PipelineTests(unittest.TestCase):
                 requested_device="cpu",
                 input_sha256=file_digest(paths.audio),
             )
-            state.complete_stage("transcription")
+            state.complete_stage("transcription", options=TranscriptionOptions(device="cpu").to_dict(),
+                                 backend_platform=backend_platform())
 
             events: list[ProgressEvent] = []
             with patch("lecture_util.pipeline.transcribe_audio") as transcribe:
@@ -185,7 +187,8 @@ def test_changed_audio_invalidates_transcription(tmp_path):
     state.start_stage('transcription', requested_model='large-v3',
                       requested_language='auto', requested_device='cpu',
                       input_sha256=file_digest(paths.audio))
-    state.complete_stage('transcription')
+    state.complete_stage('transcription', options=TranscriptionOptions(device='cpu').to_dict(),
+                         backend_platform=backend_platform())
     paths.audio.write_bytes(b'new')
     replacement = Transcript('ko', 1, 'test', 'large-v3', 'large-v3', [])
     with patch('lecture_util.pipeline.transcribe_audio', return_value=replacement) as run:
@@ -214,7 +217,8 @@ def test_cached_transcript_restores_only_missing_files(tmp_path):
     paths.transcript_srt.unlink()
     state.start_stage('transcription', requested_model='large-v3', requested_language='auto',
                       requested_device='cpu', input_sha256=file_digest(paths.audio))
-    state.complete_stage('transcription')
+    state.complete_stage('transcription', options=TranscriptionOptions(device='cpu').to_dict(),
+                         backend_platform=backend_platform())
     with patch('lecture_util.pipeline.transcribe_audio') as run:
         transcription_stage(paths, state, device='cpu')
     run.assert_not_called()
