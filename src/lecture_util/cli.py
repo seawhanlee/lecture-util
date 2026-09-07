@@ -9,6 +9,7 @@ from time import monotonic
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from lecture_util.configuration import (
     default_app_config,
@@ -133,8 +134,11 @@ def _execute_run(
             transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
         )
     console.print(
-        f"[bold green]Complete[/bold green] {published.summary} "
-        f"({format_duration(monotonic() - started)})"
+        Text.assemble(
+            ("Complete", "bold green"),
+            f" {published.summary} ({format_duration(monotonic() - started)})",
+        ),
+        highlight=False,
     )
 
 

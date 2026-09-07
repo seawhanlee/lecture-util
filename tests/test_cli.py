@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from io import StringIO
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 from typer.testing import CliRunner
+from rich.console import Console
 
 from lecture_util.cli import _execute_run, app, normalize_tags
 from lecture_util.configuration import AppConfig
@@ -296,7 +298,8 @@ class CliTests(unittest.TestCase):
     def test_execute_run_uses_cache_and_publishes_notes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            vault = root / "vault"
+            vault = root / "vault [blue] 한글 공백"
+            terminal = StringIO()
             cache = root / "cache"
             lecture_dir = vault / COURSES_DIRECTORY / COURSE / "Lectures"
             lecture_dir.mkdir(parents=True)
@@ -312,6 +315,9 @@ class CliTests(unittest.TestCase):
                 patch("lecture_util.cli.CodexSummarizer") as factory,
                 patch("lecture_util.cli.run_lecture", return_value=cached) as run_lecture,
                 patch("lecture_util.cli.ConsoleProgressReporter") as reporter,
+                patch("lecture_util.cli.console", Console(
+                    file=terminal, force_terminal=True, no_color=False, width=1000,
+                )),
             ):
                 selected = options()
                 selected.reasoning_effort = "high"
@@ -342,6 +348,9 @@ class CliTests(unittest.TestCase):
             transcript = lecture_dir / "1주차" / "2026-09-04 압축성 유동 전사.md"
             self.assertTrue(summary.is_file())
             self.assertTrue(transcript.is_file())
+            # Paths stay literal and uninterrupted by automatic ANSI highlighting.
+            self.assertIn(str(summary), terminal.getvalue())
+            self.assertIn("\x1b[1;32mComplete\x1b[0m", terminal.getvalue())
 
     def test_existing_note_stops_before_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
