@@ -350,6 +350,8 @@ class CliTests(unittest.TestCase):
             self.assertTrue(transcript.is_file())
             # Paths stay literal and uninterrupted by automatic ANSI highlighting.
             self.assertIn(str(summary), terminal.getvalue())
+            video = root / "videos" / COURSE / "1주차" / "압축성 유동.mp4"
+            self.assertIn(f"Video: {video}", terminal.getvalue())
             self.assertIn("\x1b[1;32mComplete\x1b[0m", terminal.getvalue())
 
     def test_existing_note_stops_before_pipeline(self) -> None:

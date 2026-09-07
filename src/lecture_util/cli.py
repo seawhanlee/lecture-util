@@ -140,6 +140,7 @@ def _execute_run(
         ),
         highlight=False,
     )
+    console.print(Text(f"Video: {video}"), highlight=False)
 
 
 def _interactive_terminal() -> bool:
