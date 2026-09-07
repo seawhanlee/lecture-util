@@ -17,7 +17,7 @@ from lecture_util.configuration import (
     video_root_is_in_vault,
 )
 from lecture_util.errors import LectureUtilError
-from lecture_util.form_ui import FormApp
+from lecture_util.form_ui import CodexModelPicker, FormApp
 from lecture_util.vault import discover_courses, validate_semester_start
 
 
@@ -123,11 +123,7 @@ class OnboardingApp(FormApp[AppConfig]):
         yield Input(value=self.initial.whisper_model, id="whisper-model")
         yield Label("Lecture language", classes="field-label")
         yield Input(value=self.initial.language, id="language")
-        yield Label(
-            "Codex model (blank uses Codex configured default)",
-            classes="field-label",
-        )
-        yield Input(value=self.initial.llm_model or "", id="llm-model")
+        yield CodexModelPicker(self.initial.llm_model)
 
     def on_mount(self) -> None:
         super().on_mount()
@@ -150,7 +146,7 @@ class OnboardingApp(FormApp[AppConfig]):
             f"\n\nSEMESTER START\n{self.value('semester-start') or 'Choose a date'}"
             f"\n\nTRANSCRIPTION\n{device} · {self.value('whisper-model') or 'Choose a model'}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}"
-            f"\n\nSUMMARY\n{self.value('llm-model') or 'Codex default'}"
+            f"\n\nSUMMARY\n{self.selected_model() or 'Codex default'}"
         )
 
     def _submit(self) -> None:
@@ -200,7 +196,7 @@ class OnboardingApp(FormApp[AppConfig]):
                 whisper_model=self.query_one("#whisper-model", Input).value,
                 language=self.query_one("#language", Input).value,
                 device=device,
-                llm_model=self.query_one("#llm-model", Input).value or None,
+                llm_model=self.selected_model(),
             ),
             allow_unconfirmed_video_root=True,
         )

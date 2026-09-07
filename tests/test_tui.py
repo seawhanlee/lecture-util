@@ -75,7 +75,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 device = app.query_one("#device", Select).value
                 whisper_model = app.query_one("#whisper-model", Input).value
                 language = app.query_one("#language", Input).value
-                llm_model = app.query_one("#llm-model", Input).value
+                llm_model = app.query_one("#llm-model", Select).value
 
         self.assertEqual(semester_start, "2026-09-01")
         self.assertEqual(device, "cpu")

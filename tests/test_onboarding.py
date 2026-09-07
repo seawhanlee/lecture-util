@@ -50,7 +50,7 @@ class OnboardingTests(unittest.IsolatedAsyncioTestCase):
                 app.query_one("#device", Select).value = "cpu"
                 app.query_one("#whisper-model", Input).value = "turbo"
                 app.query_one("#language", Input).value = "ko"
-                app.query_one("#llm-model", Input).value = "gpt-test"
+                app.query_one("#llm-model", Select).value = "gpt-test"
                 await pilot.click("#save")
 
             config = app.return_value

@@ -24,7 +24,7 @@ from lecture_util.configuration import (
     resolve_prompt,
 )
 from lecture_util.errors import LectureUtilError
-from lecture_util.form_ui import FormApp
+from lecture_util.form_ui import CodexModelPicker, FormApp
 from lecture_util.models import RunOptions
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
@@ -116,8 +116,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             yield Label("Lecture language", classes="field-label")
             yield Input(value=self.config.language, id="language")
         with Collapsible(title="Summary", collapsed=True):
-            yield Label("Codex model (blank uses configured default)", classes="field-label")
-            yield Input(value=self.config.llm_model or "", id="llm-model")
+            yield CodexModelPicker(self.config.llm_model)
             yield Label("Summary prompt", classes="field-label")
             yield Select(
                 (
@@ -190,7 +189,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             f"NOTE DESTINATION\n{destination}\n\n"
             f"TRANSCRIPTION\n{self._select_value('#device')} · {whisper_model}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}\n\n"
-            f"SUMMARY\n{self.value('llm-model') or 'Codex default'}\n{prompt}\n\n{rerun}"
+            f"SUMMARY\n{self.selected_model() or 'Codex default'}\n{prompt}\n\n{rerun}"
         )
 
     def _submit(self) -> None:
@@ -258,7 +257,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             raise LectureUtilError("Enter a lecture language.")
 
         raw_tags = self.query_one("#tags", Input).value.strip()
-        llm_model = self.query_one("#llm-model", Input).value.strip() or None
+        llm_model = self.selected_model()
         return RunOptions(
             url=url,
             course=course_name,

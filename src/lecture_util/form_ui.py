@@ -11,10 +11,46 @@ from textual.widget import Widget
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Checkbox, Collapsible, Input, Label, OptionList, Select, TextArea
 
+from lecture_util.codex_models import discover_models
 from lecture_util.errors import LectureUtilError
 
 T = TypeVar("T")
 R = TypeVar("R")
+
+
+class CodexModelPicker(Vertical):
+    """Shared asynchronous model selector; an empty value means Codex default."""
+
+    DEFAULT_CSS = "CodexModelPicker { height: auto; }"
+
+    def __init__(self, model: str | None) -> None:
+        super().__init__()
+        self.initial_model = model or ""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Codex model", classes="field-label")
+        options = [("Use Codex configured default", "")]
+        if self.initial_model:
+            options.append((self.initial_model, self.initial_model))
+        yield Select(options, value=self.initial_model, allow_blank=False, id="llm-model")
+        yield Label("Loading Codex models…", id="model-status", markup=False)
+
+    def on_mount(self) -> None:
+        self.run_worker(self._load_models(), exclusive=True)
+
+    async def _load_models(self) -> None:
+        catalog = await discover_models()
+        select = self.query_one(Select)
+        selected = select.value
+        options = [("Use Codex configured default", ""), *catalog.models]
+        known = {value for _, value in options}
+        for model in (self.initial_model, selected):
+            if isinstance(model, str) and model and model not in known:
+                options.append((f"{model} (saved selection)", model))
+                known.add(model)
+        select.set_options(options)
+        select.value = selected
+        self.query_one("#model-status", Label).update(catalog.status)
 
 
 class FormApp(App[T]):
@@ -93,6 +129,10 @@ class FormApp(App[T]):
 
     def value(self, field: str) -> str:
         return self.query_one(f"#{field}", Input).value.strip()
+
+    def selected_model(self) -> str | None:
+        value = self.query_one("#llm-model", Select).value
+        return value if isinstance(value, str) and value else None
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._changed(event.input)
