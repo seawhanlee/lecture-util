@@ -86,8 +86,10 @@ uv run lecture-util doctor
 설정은 `$XDG_CONFIG_HOME/lecture-util/config.json`에 저장됩니다. `XDG_CONFIG_HOME`이 없으면 `~/.config/lecture-util/config.json`을 사용합니다. 설정을 바꾸려면 대화형 터미널에서 다음 명령을 실행합니다.
 
 ```bash
-uv run lecture-util onboard
+uv run lecture-util config
 ```
+
+`config`는 저장된 설정을 채운 편집 화면을 엽니다. Codex 모델 드롭다운을 포함한 기본값을 수정한 뒤 `Ctrl+S`로 저장하고, `Esc`로 취소하면 기존 설정을 유지합니다. 설정이 없으면 최초 기본값으로 시작합니다. 기존 `uv run lecture-util onboard` 명령도 동일한 설정 편집을 지원합니다.
 
 온보딩은 Vault가 현재 강의 발행에 사용 가능한지 확인합니다. 따라서 아래 과목 구조를 먼저 만든 뒤 저장해야 합니다.
 

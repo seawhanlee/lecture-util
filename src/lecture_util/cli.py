@@ -245,9 +245,19 @@ def run_command(
 @app.command("onboard")
 def onboard_command() -> None:
     """Configure the Obsidian Vault and lecture processing defaults."""
+    _edit_configuration("Onboarding")
+
+
+@app.command("config")
+def config_command() -> None:
+    """Edit saved settings interactively, including the Codex model."""
+    _edit_configuration("Configuration")
+
+
+def _edit_configuration(label: str) -> None:
     if not _interactive_terminal():
         console.print(
-            "[red]Error:[/red] onboarding requires an interactive terminal."
+            f"[red]Error:[/red] {label.lower()} requires an interactive terminal."
         )
         raise typer.Exit(2)
 
@@ -259,7 +269,7 @@ def onboard_command() -> None:
             initial = None
         selected = run_onboarding(initial or default_app_config())
         if selected is None:
-            console.print("Onboarding cancelled; configuration was not changed.")
+            console.print(f"{label} cancelled; configuration was not changed.")
             return
         save_config(selected)
         console.print(f"[green]Configuration saved[/green] {default_config_path()}")

@@ -446,5 +446,79 @@ class CliTests(unittest.TestCase):
         self.assertIn("interactive terminal", result.output)
 
 
+    def test_config_edits_existing_settings_without_starting_lecture(self) -> None:
+        existing = configured_defaults()
+        updated = configured_defaults(Path("/new-vault"))
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_onboarding_config", return_value=existing),
+            patch("lecture_util.cli.run_onboarding", return_value=updated) as editor,
+            patch("lecture_util.cli.save_config", return_value=updated) as save,
+            patch("lecture_util.cli._execute_run") as execute,
+        ):
+            result = self.runner.invoke(app, ["config"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        editor.assert_called_once_with(existing)
+        save.assert_called_once_with(updated)
+        execute.assert_not_called()
+        self.assertIn("Configuration saved", result.output)
+
+    def test_config_cancel_preserves_settings(self) -> None:
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_onboarding_config", return_value=configured_defaults()),
+            patch("lecture_util.cli.run_onboarding", return_value=None),
+            patch("lecture_util.cli.save_config") as save,
+        ):
+            result = self.runner.invoke(app, ["config"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Configuration cancelled", result.output)
+        save.assert_not_called()
+
+    def test_config_requires_interactive_terminal(self) -> None:
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=False),
+            patch("lecture_util.cli.run_onboarding") as editor,
+        ):
+            result = self.runner.invoke(app, ["config"])
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("interactive terminal", result.output)
+        editor.assert_not_called()
+
+    def test_config_missing_or_broken_settings_can_be_repaired(self) -> None:
+        defaults = configured_defaults()
+        for error in (None, LectureUtilError("Invalid configuration")):
+            with (
+                self.subTest(error=error),
+                patch("lecture_util.cli._interactive_terminal", return_value=True),
+                patch("lecture_util.cli.load_onboarding_config", return_value=None, side_effect=error),
+                patch("lecture_util.cli.default_app_config", return_value=defaults),
+                patch("lecture_util.cli.run_onboarding", return_value=defaults) as editor,
+                patch("lecture_util.cli.save_config") as save,
+            ):
+                result = self.runner.invoke(app, ["config"])
+                self.assertEqual(result.exit_code, 0, result.output)
+                editor.assert_called_once_with(defaults)
+                save.assert_called_once_with(defaults)
+                if error:
+                    self.assertIn("Warning", result.output)
+
+    def test_config_save_failure_returns_error(self) -> None:
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_onboarding_config", return_value=configured_defaults()),
+            patch("lecture_util.cli.run_onboarding", return_value=configured_defaults()),
+            patch("lecture_util.cli.save_config", side_effect=LectureUtilError("Cannot save")),
+        ):
+            result = self.runner.invoke(app, ["config"])
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("Cannot save", result.output)
+
+    def test_config_help_describes_settings_editor(self) -> None:
+        result = self.runner.invoke(app, ["config", "--help"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Edit saved settings", result.output)
+
+
 if __name__ == "__main__":
     unittest.main()
