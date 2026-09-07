@@ -161,6 +161,9 @@ uv run lecture-util
 | Transcription device | 온보딩 설정값 | `auto`, `mlx`, `cuda`, `cpu` 중 직접 선택 가능 |
 | Whisper model | 온보딩 설정값 | Whisper 모델 이름 또는 지원되는 모델 경로 |
 | Lecture language | 온보딩 설정값 | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
+| Compute type | `auto` | faster-whisper의 정밀도. CUDA는 FP16, CPU는 INT8이 기본 |
+| Batch size | `0` | `0`은 기존 비배치 처리, 양수는 배치 크기 |
+| Beam size | 빈 값 | faster-whisper 기본값 5. 양수로 직접 지정 가능 |
 | Codex model | 온보딩 설정값 | 드롭다운에서 이번 강의에 사용할 모델 선택 |
 | Thinking effort | 온보딩 설정값 | 이번 강의에 사용할 추론 강도 선택 |
 | Summary prompt | 기본 프롬프트 | 직접 입력하거나 Markdown/text 파일에서 읽기 |
@@ -352,7 +355,7 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
         └── 압축성 유동.mp4
 ```
 
-같은 URL에 대해 다운로드가 완료된 상태이고 해당 영상이 있으면 재사용합니다. 완료 기록이 없는 같은 경로의 파일은 실수로 덮어쓰지 않으며, 명시적으로 `--force`를 지정해야 교체합니다.
+같은 URL에 대해 다운로드가 완료되고 기록된 영상 경로와 SHA-256이 일치하면 재사용합니다. 완료 기록이 없는 같은 경로의 파일은 실수로 덮어쓰지 않으며, 명시적으로 `--force`를 지정해야 교체합니다.
 
 ### 사용자 캐시
 
@@ -365,47 +368,64 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
 ├── transcript.md
 ├── transcript.srt
 ├── summary.md
-└── run.json
+├── run.json
+├── request.json
+└── publication.json
 ```
 
-`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그와 각 처리 단계의 상태가 기록됩니다. 캐시와 영상은 자동 삭제하지 않습니다.
+`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그, 입력·출력 지문과 각 단계의 상태가 기록됩니다. `request.json`은 재개에 필요한 입력과 프롬프트 본문을 보관하고, `publication.json`은 게시할 두 노트의 내용·지문·상태를 보관합니다. 이 파일들은 캐시에만 저장되며 저장소에 커밋하지 않습니다. 캐시와 영상은 자동 삭제하지 않습니다.
 
 ### 기존 설정과 영상 옮기기
 
 영상 경로가 없는 설정 v1은 새 실행에 사용할 수 없습니다. 먼저 `lecture-util onboard`를 실행해 기존 Vault, 학기 및 모델 설정을 불러온 뒤 영상 경로를 저장합니다. 기존 영상은 자동으로 이동하지 않습니다.
 
-기존 `~/.cache/lecture-util/lecture-<URL 해시>/source.mp4`를 계속 재사용하려면 직접 다음 위치로 옮깁니다.
-
-```text
-<설정한 영상 경로>/<과목>/<N주차>/<제목>.mp4
-```
-
-`N주차`는 온보딩의 학기 시작일과 강의일을 기준으로 계산합니다. 기존 `run.json`의 `course`, `lecture_date`, `title` 값을 참고할 수 있습니다.
+기존 영상은 기록된 다운로드 출력 경로와 현재 경로가 같을 때만 재사용합니다.
+영상 파일을 직접 옮겨 출력 경로가 달라졌다면 새 경로의 파일을 자동으로 신뢰하지 않습니다.
+원본을 별도로 보관한 뒤 `--force`로 다시 다운로드하거나 기존 저장 위치를 사용하세요.
+입력 지문이 없는 이전 캐시는 오디오·전사·요약을 처음 한 번 다시 계산합니다.
 
 ## 캐시 재사용과 실패 복구
 
 같은 URL을 다시 처리하면 URL 해시가 같으므로 기존 작업공간을 사용합니다.
 
-- 같은 과목·주차·제목 위치에 다운로드된 영상과 오디오가 정상적으로 완료되어 있으면 다시 만들지 않습니다.
-- Whisper 모델, 언어와 장치가 이전 실행과 같으면 기존 전사문을 재사용합니다.
-- 전사 내용, Codex 모델과 요약 프롬프트가 같으면 기존 요약을 재사용합니다.
-- 같은 URL이면 오디오와 전사 캐시는 유지되지만, 과목·주차·제목이 바뀌어 새 영상 경로가 되면 그 위치에는 영상을 다시 다운로드합니다.
-- 실패한 단계는 `run.json`에 실패 상태와 메시지를 기록하며 다음 실행에서 다시 시도합니다.
+- 완료 상태뿐 아니라 입력·출력 파일 지문과 전사 옵션을 비교합니다. 모델·언어·장치·정밀도·배치·beam 또는 실행 플랫폼이 바뀌면 전사를 다시 수행합니다.
+- 상위 단계를 시작할 때 하위 완료 상태를 무효화합니다. 따라서 `download --force` 이후 일반 `transcribe`도 새 오디오를 처리합니다.
+- 유효한 JSON 전사가 있고 Markdown/SRT만 없으면 누락된 파일을 복원합니다. 기존 Markdown 편집 내용은 보존되며, 요약 캐시는 편집된 내용을 기준으로 판단합니다.
+- 손상된 상태와 전사 JSON은 오류로 보고합니다. `run.json`은 정상 백업에서 복구하고, 전사는 `transcribe --force`로 재생성할 수 있습니다.
+- 같은 URL의 동시 실행은 작업공간 잠금으로 차단합니다. 게시에는 기존 파일을 교체하지 않는 배타적 생성과 강의 폴더 잠금을 사용합니다.
+- 노트 한 개만 게시된 뒤 실패하면, 게시 기록과 기존 파일의 내용이 일치하는 경우에만 나머지를 복구합니다. 사용자가 수정했거나 이미 게시가 완료된 노트는 덮어쓰지 않습니다.
 
 캐시를 재사용한 단계는 진행 화면에서 `↻`로 표시됩니다.
 
 ```text
-↻ [1/4] Reusing video (96.8 MiB)
-↻ [2/4] Reusing extracted audio (61.4 MiB)
-↻ [3/4] Reusing 282 transcript segments (ko)
-↻ [4/4] Reusing summary from /home/seawhan/.cache/lecture-util/lecture-0123456789/summary.md
+↻ [1/5] Reusing video (96.8 MiB)
+↻ [2/5] Reusing extracted audio (61.4 MiB)
+↻ [3/5] Reusing 282 transcript segments (ko)
+↻ [4/5] Reusing summary from /home/seawhan/.cache/lecture-util/lecture-0123456789/summary.md
 ```
 
 기존 Vault 노트를 새 내용으로 교체하려면 도구 밖에서 기존 노트를 직접 이동하거나 이름을 바꾼 뒤 다시 실행해야 합니다. 노트가 남아 있는 동안에는 원본 보호를 위해 실행이 시작되지 않습니다.
 
+### 재개 명령과 입력 복원
+
+실행 오류에는 실패 단계, 캐시 위치와 다음 재개 명령이 표시됩니다.
+
+```bash
+uv run lecture-util resume ~/.cache/lecture-util/lecture-<URL해시>
+```
+
+재개는 저장된 모델·경로·강의 정보·프롬프트를 사용하며 현재 전역 설정을 다시 적용하지 않습니다.
+완료된 단계는 재사용하고, 강제 재실행 옵션은 반복하지 않습니다. 실패한 강제 다운로드의 파일 교체 권한은 해당 시도의 상태에 기록되어 재시도에 적용됩니다.
+기존 작업공간에 `request.json`이 없으면 원래 URL과 메타데이터로 `run`을 다시 실행해야 합니다.
+
+TUI 실행 실패 후에는 `retry`, `edit`, `quit`을 선택합니다. `edit`은 입력과 프롬프트를 복원한 폼을 엽니다.
+`Ctrl+C`는 재시도 없이 중단하며 종료 코드는 130입니다. TUI 제출 시 모델을 다운로드하지 않는 사전 검사를 비동기로 수행하고, 오류가 있으면 입력을 보존합니다.
+
+전사 진행 화면에는 모델 준비와 추론 상태를 표시합니다. faster-whisper는 처리 위치 기반의 추정 진행률과 오디오 시간/실행 시간 배속을 보여줍니다. 무음을 건너뛸 수 있으므로 정확한 남은 시간 예측은 아닙니다. MLX는 공개 API가 제공하지 않는 구간별 진행률을 표시하지 않습니다.
+
 ## 단계별 명령
 
-문제 진단이나 수동 복구가 필요할 때 작업 단계를 따로 실행할 수 있습니다. 단계별 명령은 캐시만 변경하며 Vault 노트를 발행하지 않습니다.
+문제 진단이나 수동 복구가 필요할 때 작업 단계를 따로 실행할 수 있습니다. `run`, `transcribe`, `summarize`는 명시적 옵션 → 저장 설정 → 프로그램 기본값 순서로 값을 선택합니다. 단독 전사·요약은 설정이나 Vault가 없어도 사용할 수 있지만 잘못된 설정 파일은 오류로 보고합니다. 단계별 명령은 캐시만 변경하며 Vault 노트를 발행하지 않습니다.
 
 ### 다운로드와 오디오 추출
 
@@ -450,6 +470,40 @@ uv run lecture-util summarize LECTURE_DIR \
 ```
 
 `LECTURE_DIR/transcript.json`과 `transcript.md`를 읽어 `summary.md`를 만듭니다. 이 명령 역시 Obsidian 노트를 발행하지 않으므로 최종 Vault 발행이 필요하면 같은 URL로 전체 `run` 명령을 실행하세요. 완료된 캐시 단계는 재사용됩니다.
+
+## 전사 최적화와 비교 측정
+
+기본 모델과 품질 설정은 유지됩니다. faster-whisper에서만 다음 옵션을 적용할 수 있습니다.
+
+```bash
+uv run lecture-util transcribe LECTURE_DIR \
+  --device cuda --whisper-model large-v3 --language ko \
+  --compute-type int8_float16 --batch-size 4 --beam-size 5
+```
+
+`--beam-size default`는 저장된 beam 설정을 백엔드 기본값으로 되돌립니다.
+`--compute-type`은 `auto`, `float16`, `float32`, `int8`, `int8_float16` 중 선택하며 장치 지원 여부를 검사합니다.
+배치 처리는 속도를 높일 수 있지만 메모리 사용과 전사 결과도 달라질 수 있습니다.
+MLX는 `auto`, 배치 `0`, 기본 beam만 허용합니다. 명시적 장치 선택 화면에서 MLX를 선택하면 튜닝 필드를 기본값으로 되돌리고 비활성화합니다.
+`large-v3` 메모리 부족 시 참조와 캐시를 정리한 뒤 `turbo`로 한 번 재시도하며, 다른 오류와 취소는 재시도하지 않습니다.
+
+실제 강의로 기본값을 바꾸기 전에 다음 개발용 도구로 비교할 수 있습니다. 지정한 로컬 WAV만 읽으며 조합별로 별도 프로세스를 실행합니다.
+
+```bash
+uv run python -m lecture_util.benchmark \
+  --audio /path/to/sample.wav --device cuda --language ko \
+  --models large-v3 turbo --compute-types float16 int8_float16 \
+  --batch-sizes 0 4 --beam-sizes 1 5 \
+  --reference /path/to/reference.txt --terms /path/to/terms.txt \
+  --output /tmp/lecture-benchmark.json
+```
+
+정답 텍스트와 용어 목록은 선택 사항이며, 용어 파일은 한 줄에 하나씩 작성합니다.
+JSON과 CSV에는 준비·추론 시간, 전체 처리 시간/오디오 길이 비율(RTF), 프로세스 최대 RSS, 정규화 CER, 용어 누락률과 실패 이유를 기록합니다.
+CER는 NFC 정규화·대소문자 통일 후 공백과 구두점을 제외해 계산합니다. 용어 누락은 같은 정규화 후 문자열 포함 여부로 판정하며 의미적 정확도 평가는 아닙니다.
+MLX 준비·추론 시간은 분리할 수 없어 결합 시간만 기록합니다. RSS에는 전용 GPU 메모리가 포함되지 않으며 GPU 메모리 필드는 미측정으로 남습니다.
+모델이 캐시에 없는 첫 실행은 다운로드 시간이 포함됩니다. 공정한 비교는 모델 준비 상태를 맞추고 같은 입력과 조합으로 반복 측정하세요.
+결과에는 전사 본문을 저장하지 않습니다. 실제 모델 추론은 일반 테스트에서 실행하지 않습니다.
 
 ## 자주 발생하는 오류
 
