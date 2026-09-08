@@ -87,6 +87,34 @@ def _run_or_exit(action: Callable[[], None]) -> None:
         raise typer.Exit(1) from error
 
 
+def _execute_download(
+    url: str, *, course: str, title: str, lecture_date: str,
+    semester_start: str, vault_root: Path, video_root: Path,
+    output_dir: Path, tags: list[str] | None = None, force: bool = False,
+    video_only: bool = True,
+) -> None:
+    validate_hls_url(url)
+    selected_course = resolve_course(course, vault_root)
+    selected_date = validate_lecture_date(lecture_date)
+    selected_title = validate_title(title)
+    video = lecture_video_path(
+        video_root, selected_course, selected_date, selected_title,
+        semester_start=semester_start,
+    )
+    paths, state = create_workspace(
+        url, output_dir, video_path=video, title=selected_title,
+        course=selected_course.name, lecture_date=selected_date, tags=tags,
+    )
+    stages = ("download",) if video_only else ("download", "audio")
+    with ConsoleProgressReporter(stages, console=console) as progress:
+        download_stage(paths, state, force=force, progress=progress)
+        if not video_only:
+            audio_stage(paths, state, force=force, progress=progress)
+    console.print(Text(f"Video: {video}"), highlight=False, soft_wrap=True)
+    if not video_only:
+        console.print(Text(f"Prepared: {paths.root}"), highlight=False, soft_wrap=True)
+
+
 def _execute_run(
     options: RunOptions,
     *,
@@ -94,6 +122,18 @@ def _execute_run(
     video_root: Path | None = None,
     cache_root: Path | None = None,
 ) -> None:
+    if options.video_only:
+        _execute_download(
+            options.url, course=options.course, title=options.title,
+            lecture_date=options.lecture_date,
+            semester_start=options.semester_start or default_semester_start(
+                date.fromisoformat(validate_lecture_date(options.lecture_date))
+            ),
+            vault_root=vault_root, video_root=video_root or default_cache_root(),
+            output_dir=cache_root or default_cache_root(), tags=options.tags,
+            force=options.force,
+        )
+        return
     course = resolve_course(options.course, vault_root)
     lecture_date = validate_lecture_date(options.lecture_date)
     semester_start = validate_semester_start(
@@ -276,17 +316,21 @@ def run_command(
         help="Override the configured transcription device",
     ),
     prompt: str | None = typer.Option(None, "--prompt"),
-    prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
+    prompt_file: Path | None = typer.Option(None, "--prompt-file", dir_okay=False),
     force: bool = typer.Option(False, "--force"),
+    video_only: bool = typer.Option(False, "--video-only", help="Download video without audio extraction or notes"),
 ) -> None:
     """Process a URL or local media file and publish one lecture to the Obsidian vault."""
 
     def action() -> None:
-        config = load_config(required=True)
+        config = (load_config(required=True, video_only=True)
+                  if video_only else load_config(required=True))
         assert config is not None
+        if video_only:
+            validate_hls_url(url)
         source = resolve_source(url)
         validated_url = source.location
-        selected_prompt = resolve_prompt(prompt, prompt_file)
+        selected_prompt = "" if video_only else resolve_prompt(prompt, prompt_file)
         selected_llm_model = (
             config.llm_model
             if llm_model is None
@@ -296,6 +340,7 @@ def run_command(
             RunOptions(
                 url=validated_url,
                 source=source,
+                video_only=video_only,
                 course=course,
                 lecture_date=lecture_date,
                 semester_start=semester_start or config.semester_start,
@@ -370,38 +415,22 @@ def download_command(
     ),
     tag: list[str] | None = typer.Option(None, "--tag"),
     force: bool = typer.Option(False, "--force"),
+    video_only: bool = typer.Option(False, "--video-only", help="Download video without audio extraction or notes"),
 ) -> None:
     """Download a lecture and extract transcription-ready audio."""
 
     def action() -> None:
-        config = load_config(required=True)
+        config = (load_config(required=True, video_only=True)
+                  if video_only else load_config(required=True))
         assert config is not None
         validate_hls_url(url)
-        selected_course = resolve_course(course, config.vault_root)
-        selected_date = validate_lecture_date(
-            lecture_date or date.today().isoformat()
+        _execute_download(
+            url, course=course, title=title,
+            lecture_date=lecture_date or date.today().isoformat(),
+            semester_start=config.semester_start, vault_root=config.vault_root,
+            video_root=config.video_root, output_dir=output_dir,
+            tags=normalize_tags(tag), force=force, video_only=video_only,
         )
-        selected_title = validate_title(title)
-        video = lecture_video_path(
-            config.video_root,
-            selected_course,
-            selected_date,
-            selected_title,
-            semester_start=config.semester_start,
-        )
-        paths, state = create_workspace(
-            url,
-            output_dir,
-            video_path=video,
-            title=selected_title,
-            course=selected_course.name,
-            lecture_date=selected_date,
-            tags=normalize_tags(tag),
-        )
-        with ConsoleProgressReporter(("download", "audio"), console=console) as progress:
-            download_stage(paths, state, force=force, progress=progress)
-            audio_stage(paths, state, force=force, progress=progress)
-        console.print(f"[green]Prepared[/green] {paths.root}")
 
     _run_or_exit(action)
 

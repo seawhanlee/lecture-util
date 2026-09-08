@@ -361,3 +361,29 @@ class LocalMediaTuiTests(unittest.IsolatedAsyncioTestCase):
                     options = app._build_options()
                 self.assertEqual(options.source, source)
                 self.assertEqual(options.url, path)
+
+
+class VideoOnlyTuiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_video_only_skips_processing_validation_and_note_conflict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / 'vault'
+            create_vault(vault)
+            app = configured_app(vault)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one('#source', Input).value = URL
+                await pilot.pause()
+                app.query_one('#processing-mode', Select).value = 'video'
+                app.query_one('#lecture-title', Input).value = 'Lecture'
+                app.query_one('#lecture-date', Input).value = '2026-09-07'
+                app.query_one('#whisper-model', Input).value = ''
+                app.query_one('#language', Input).value = ''
+                with patch('lecture_util.tui.ensure_paths_available') as check:
+                    result = app._build_options()
+                    self.assertTrue(result.video_only)
+                    check.assert_not_called()
+                app.refresh_preview()
+                self.assertIn('VIDEO DESTINATION', str(app.query_one('#preview-content', Label).render()))
+                app.query_one('#source', Input).value = '/tmp/local.wav'
+                await pilot.pause()
+                self.assertTrue(app.query_one('#processing-mode', Select).disabled)
+                self.assertEqual(app.query_one('#processing-mode', Select).value, 'full')

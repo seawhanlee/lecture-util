@@ -40,6 +40,12 @@ def _ask_validated(console: Console, label: str, validate: Callable[[str], T],
 
 def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions | None:
     source = resolve_source(url)
+    video_only = False
+    if source.kind == "hls":
+        video_only = Prompt.ask(
+            "Processing mode (full: transcribe and publish, video: download only)",
+            choices=["full", "video"], default="full", console=console,
+        ) == "video"
     courses = discover_courses(config.vault_root)
     table = Table(title="Choose a course")
     table.add_column("Number", justify="right")
@@ -74,9 +80,10 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
 
     def available_title(value: str) -> str:
         title = validate_title(value)
-        ensure_paths_available(published_lecture_paths(
-            course, lecture_date, title, semester_start=config.semester_start,
-        ))
+        if not video_only:
+            ensure_paths_available(published_lecture_paths(
+                course, lecture_date, title, semester_start=config.semester_start,
+            ))
         return title
 
     title = _ask_validated(console, "Lecture title", available_title)
@@ -97,12 +104,13 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
         ("Codex model", config.llm_model or "Codex default"),
         ("Thinking effort", config.reasoning_effort or "Codex default"),
     ):
-        preview.add_row(label, Text(value))
+        if not video_only or label not in {"Note", "Transcription", "Codex model", "Thinking effort"}:
+            preview.add_row(label, Text(value))
     console.print(preview)
     if not Confirm.ask("Start processing?", default=True, console=console):
         return None
     return RunOptions(
-        source=source, url=source.location, course=course.name, lecture_date=lecture_date, title=title,
+        video_only=video_only, source=source, url=source.location, course=course.name, lecture_date=lecture_date, title=title,
         semester_start=config.semester_start, llm_model=config.llm_model,
         reasoning_effort=config.reasoning_effort, tags=None,
         whisper_model=config.whisper_model, language=config.language,

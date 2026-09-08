@@ -155,6 +155,7 @@ def app_config_from_dict(
     data: Any,
     *,
     validate_vault: bool = True,
+    video_only: bool = False,
 ) -> AppConfig:
     if not isinstance(data, dict):
         raise LectureUtilError("Configuration must be a JSON object.")
@@ -162,6 +163,9 @@ def app_config_from_dict(
         raise LectureUtilError(
             f"Unsupported configuration version: {data.get('version')!r}."
         )
+    if video_only:
+        data = {**data, "whisper_model": "large-v3", "language": "auto",
+                "device": "auto", "llm_model": None, "reasoning_effort": None}
     vault_root = _required_string(data, "vault_root", "Vault path")
     video_root = _required_string(data, "video_root", "video storage path")
     semester_start = _required_string(data, "semester_start", "semester start date")
@@ -222,6 +226,7 @@ def load_config(
     *,
     required: bool = False,
     validate_vault: bool = True,
+    video_only: bool = False,
 ) -> AppConfig | None:
     selected_path = path or default_config_path()
     if not selected_path.exists():
@@ -232,7 +237,7 @@ def load_config(
         return None
     try:
         data = json.loads(selected_path.read_text(encoding="utf-8"))
-        return app_config_from_dict(data, validate_vault=validate_vault)
+        return app_config_from_dict(data, validate_vault=validate_vault, video_only=video_only)
     except LectureUtilError as error:
         raise LectureUtilError(
             f"Invalid configuration {selected_path}: {error} "

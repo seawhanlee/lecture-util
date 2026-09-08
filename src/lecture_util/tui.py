@@ -30,6 +30,7 @@ from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
     discover_courses,
     lecture_week,
+    lecture_video_path,
     ensure_paths_available,
     published_lecture_paths,
     resolve_course,
@@ -89,6 +90,11 @@ class LectureSetupApp(FormApp[RunOptions]):
         yield Input(placeholder="압축성 유동", id="lecture-title")
         yield Label("HLS URL or local media path", classes="field-label")
         yield Input(placeholder="https://…/index.m3u8 or /path/to/lecture.m4a", id="source")
+
+        yield Select(
+            [("Transcribe, summarize and publish", "full"), ("Download video only", "video")],
+            value="full", allow_blank=False, id="processing-mode", disabled=True,
+        )
 
         with Collapsible(title="Lecture options", collapsed=True):
             yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
@@ -160,6 +166,12 @@ class LectureSetupApp(FormApp[RunOptions]):
         self.query_one("#prompt-file", Input).display = mode == "file"
 
     def refresh_preview(self) -> None:
+        mode_select = self.query_one("#processing-mode", Select)
+        is_url = self.value("source").lower().startswith(("http://", "https://"))
+        mode_select.disabled = not is_url
+        if not is_url and mode_select.value != "full":
+            mode_select.value = "full"
+        video_only = mode_select.value == "video"
         course = self._select_value("#course")
         title = self.value("lecture-title") or "Untitled lecture"
         lecture_date = self.value("lecture-date") or "Choose a date"
@@ -174,6 +186,20 @@ class LectureSetupApp(FormApp[RunOptions]):
             destination = str(paths.summary)
         except (LectureUtilError, StopIteration):
             pass
+        if video_only:
+            try:
+                destination = str(lecture_video_path(
+                    self.config.video_root,
+                    next(item for item in self.courses if item.name == course),
+                    self.value("lecture-date"), title,
+                    semester_start=self.value("semester-start"),
+                ))
+            except (LectureUtilError, StopIteration):
+                destination = "Complete the date and title to preview the video path."
+            self.query_one("#preview-content", Label).update(
+                f"{course}\n{lecture_date}\n{title}\n\nVIDEO DESTINATION\n{destination}"
+            )
+            return
         mode = self._select_value("#prompt-mode")
         prompt = {
             "default": "Default instructions",
@@ -226,6 +252,17 @@ class LectureSetupApp(FormApp[RunOptions]):
         course_name = self._select_value("#course")
         course = resolve_course(course_name, self.vault_root)
         self.checked("lecture-date", lambda: lecture_week(lecture_date, semester_start))
+        if self._select_value("#processing-mode") == "video":
+            if source.kind != "hls":
+                self.error_field = "source"
+                raise LectureUtilError("Video-only mode requires a public .m3u8 URL.")
+            return RunOptions(
+                url=source.location, source=source, video_only=True,
+                course=course_name, lecture_date=lecture_date, title=title,
+                semester_start=semester_start, llm_model=None, tags=None,
+                whisper_model="", language="", device="auto", prompt="",
+                force=self.query_one("#force", Checkbox).value,
+            )
         self.error_field = "lecture-title"
         ensure_paths_available(
             published_lecture_paths(

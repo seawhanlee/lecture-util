@@ -84,6 +84,7 @@ class RunOptions:
     semester_start: str | None = None
     reasoning_effort: str | None = None
     source: LectureSource | None = None
+    video_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)

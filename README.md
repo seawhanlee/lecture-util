@@ -516,3 +516,26 @@ uv run lecture-util run './강의 영상.mp4' \
 중간 산출물은 캐시에 저장합니다. 경로와 파일 내용으로 캐시를 구분하므로
 같은 경로의 내용이 바뀌면 새로 처리합니다. `--force`는 캐시를 다시 처리하지만
 원본이나 기존 Vault 노트를 덮어쓰지 않습니다. 기존 노트가 있으면 제목을 바꾸세요.
+
+
+### 영상만 다운로드
+
+전사·요약 없이 공개 HLS 영상을 MP4로 저장하려면 `--video-only`를 사용합니다.
+
+```bash
+uv run lecture-util run 'https://example.com/lecture/index.m3u8' \
+  --course '공기역학특론' --date 2026-09-07 --title '첫 강의' --video-only
+uv run lecture-util download 'https://example.com/lecture/index.m3u8' \
+  --course '공기역학특론' --title '첫 강의' --video-only
+```
+
+`download`에서 날짜를 생략하면 오늘 날짜를 사용합니다. `run`은 날짜가 필수입니다.
+URL만 전달하는 대화형 실행에서는 처리 모드에 `video`를 선택하고, TUI에서는
+`Download video only`를 선택합니다. 기본값은 전사·요약·Vault 저장입니다.
+로컬 파일 경로에서는 다운로드 전용 모드를 사용할 수 없습니다.
+
+영상은 설정된 동영상 저장소의 과목·주차 폴더에 저장하며 완료 화면에서 경로를
+확인할 수 있습니다. 오디오 추출·전사·요약·노트 발행은 수행하지 않고 다운로드
+상태만 캐시에 기록합니다. 기존 Vault 노트가 있어도 다운로드할 수 있습니다.
+기존 영상은 완료 기록이 일치하면 재사용하고, 그 외에는 `--force` 없이 덮어쓰지
+않습니다. 옵션 없는 `download`는 기존처럼 오디오 추출까지 수행합니다.
