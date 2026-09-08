@@ -68,7 +68,7 @@ class PipelineTests(unittest.TestCase):
                 video_path=video,
             )
 
-            def download(_url: str, destination: Path) -> None:
+            def download(_url: str, destination: Path, **kwargs) -> None:
                 destination.write_bytes(b"replacement")
 
             with (

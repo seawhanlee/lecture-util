@@ -37,7 +37,7 @@ def download_stage(
     report(progress, "download", "start", "Downloading HLS video")
     state.start_stage("download")
     try:
-        download_hls(state.url, paths.video)
+        download_hls(state.url, paths.video, progress=progress)
     except BaseException as error:
         state.fail_stage("download", error)
         report(

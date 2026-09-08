@@ -22,7 +22,7 @@ class MediaCommandTests(unittest.TestCase):
             destination = Path(directory) / "cache" / "source.mp4"
             temporary = destination.with_name(".source.download.mp4")
 
-            def interrupt_download(argv: list[str]) -> None:
+            def interrupt_download(argv: list[str], **kwargs) -> None:
                 output = Path(argv[argv.index("--output") + 1])
                 output.write_bytes(b"incomplete")
                 raise KeyboardInterrupt
@@ -32,7 +32,7 @@ class MediaCommandTests(unittest.TestCase):
                     "lecture_util.media.require_executable",
                     side_effect=lambda name: name,
                 ),
-                patch("lecture_util.media.run_command", side_effect=interrupt_download),
+                patch("lecture_util.media.run_download_command", side_effect=interrupt_download),
                 self.assertRaises(KeyboardInterrupt),
             ):
                 download_hls("https://example.com/lecture.m3u8", destination)
@@ -47,7 +47,7 @@ class MediaCommandTests(unittest.TestCase):
             destination.write_bytes(b"complete")
             temporary = destination.with_name(".source.download.mp4")
 
-            def interrupt_download(argv: list[str]) -> None:
+            def interrupt_download(argv: list[str], **kwargs) -> None:
                 output = Path(argv[argv.index("--output") + 1])
                 output.write_bytes(b"incomplete")
                 raise KeyboardInterrupt
@@ -57,7 +57,7 @@ class MediaCommandTests(unittest.TestCase):
                     "lecture_util.media.require_executable",
                     side_effect=lambda name: name,
                 ),
-                patch("lecture_util.media.run_command", side_effect=interrupt_download),
+                patch("lecture_util.media.run_download_command", side_effect=interrupt_download),
                 self.assertRaises(KeyboardInterrupt),
             ):
                 download_hls("https://example.com/lecture.m3u8", destination)

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 from pathlib import Path
+from time import monotonic
 from urllib.parse import urlparse
 
 from lecture_util.models import LectureSource
+from lecture_util.progress import ProgressCallback, format_size, report
 from lecture_util.errors import CommandError, DependencyError, LectureUtilError
 
 
@@ -50,7 +53,81 @@ def tool_version(name: str) -> str:
     return output.splitlines()[0] if output else "unknown"
 
 
-def download_hls(url: str, destination: Path) -> None:
+DOWNLOAD_PROGRESS_PREFIX = "lecture-util-download:"
+POSTPROCESS_PREFIX = "lecture-util-postprocess:"
+
+
+def run_download_command(
+    argv: list[str], *, progress: ProgressCallback | None = None,
+) -> None:
+    """Drain merged output continuously and retain only a bounded diagnostic tail."""
+    try:
+        process = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+        )
+    except OSError as error:
+        raise CommandError(f"Could not start {argv[0]}: {error}") from error
+    diagnostic = ""
+    last_update = float("-inf")
+    postprocessing = False
+    try:
+        assert process.stdout is not None
+        for line in process.stdout:
+            diagnostic = (diagnostic + line)[-2000:]
+            if line.startswith(POSTPROCESS_PREFIX):
+                if not postprocessing:
+                    report(progress, "download", "update", "Finalizing downloaded video")
+                    postprocessing = True
+                continue
+            if not line.startswith(DOWNLOAD_PROGRESS_PREFIX):
+                continue
+            try:
+                payload = json.loads(line[len(DOWNLOAD_PROGRESS_PREFIX):])
+                status = payload["status"]
+                speed = payload.get("speed")
+                if speed in (None, "NA"):
+                    speed = None
+                if speed is not None:
+                    speed = float(speed)
+                    if not math.isfinite(speed) or speed < 0:
+                        continue
+            except (ValueError, TypeError, KeyError, AttributeError):
+                continue
+            if status == "finished":
+                if not postprocessing:
+                    report(progress, "download", "update", "Finalizing downloaded video")
+                    postprocessing = True
+            elif status == "downloading":
+                postprocessing = False
+                now = monotonic()
+                if now - last_update < 1:
+                    continue
+                last_update = now
+                detail = "속도 계산 중" if speed is None else f"{format_size(int(speed))}/s"
+                report(progress, "download", "update", f"Downloading · {detail}")
+        returncode = process.wait()
+        if returncode:
+            raise CommandError(
+                f"{argv[0]} exited with status {returncode}.\n{diagnostic.strip()}"
+            )
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        raise
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+def download_hls(
+    url: str, destination: Path, *, progress: ProgressCallback | None = None,
+) -> None:
     validate_hls_url(url)
     yt_dlp = require_executable("yt-dlp")
     ffmpeg = require_executable("ffmpeg")
@@ -59,9 +136,15 @@ def download_hls(url: str, destination: Path) -> None:
     if temporary.exists():
         temporary.unlink()
     try:
-        run_command(
+        run_download_command(
             [
                 yt_dlp,
+                "--newline",
+                "--progress",
+                "--progress-template",
+                'download:lecture-util-download:{"status":%(progress.status)j,"speed":%(progress.speed)j}',
+                "--progress-template",
+                "postprocess:lecture-util-postprocess:%(progress.status)s",
                 "--no-playlist",
                 "--no-part",
                 "--merge-output-format",
@@ -71,7 +154,8 @@ def download_hls(url: str, destination: Path) -> None:
                 "--output",
                 str(temporary),
                 url,
-            ]
+            ],
+            progress=progress,
         )
         if not temporary.exists():
             raise CommandError("yt-dlp completed without creating the expected video file.")

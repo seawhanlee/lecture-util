@@ -53,7 +53,13 @@ class MediaIntegrationTests(unittest.TestCase):
             try:
                 video = root / "result" / "source.mp4"
                 audio = root / "result" / "audio.wav"
-                download_hls(f"http://127.0.0.1:{server.server_port}/index.m3u8", video)
+                events = []
+                download_hls(
+                    f"http://127.0.0.1:{server.server_port}/index.m3u8", video,
+                    progress=events.append,
+                )
+                self.assertTrue(any(event.message.startswith("Downloading ·") for event in events))
+                self.assertEqual(events[-1].message, "Finalizing downloaded video")
                 extract_audio(video, audio)
             finally:
                 server.shutdown()
