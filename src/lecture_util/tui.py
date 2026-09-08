@@ -20,12 +20,12 @@ from lecture_util.configuration import (
     AppConfig,
     default_app_config,
     normalize_tags,
-    read_urls,
     resolve_prompt,
 )
 from lecture_util.errors import LectureUtilError
 from lecture_util.form_ui import CodexModelPicker, FormApp
 from lecture_util.models import RunOptions
+from lecture_util.media import resolve_source
 from lecture_util.vault import (
     DEFAULT_VAULT_ROOT,
     discover_courses,
@@ -87,8 +87,8 @@ class LectureSetupApp(FormApp[RunOptions]):
         yield Input(value=lecture_date, id="lecture-date")
         yield Label("Lecture title", classes="field-label")
         yield Input(placeholder="압축성 유동", id="lecture-title")
-        yield Label("Public .m3u8 URL", classes="field-label")
-        yield Input(placeholder="https://example.com/lecture/index.m3u8", id="source")
+        yield Label("HLS URL or local media path", classes="field-label")
+        yield Input(placeholder="https://…/index.m3u8 or /path/to/lecture.m4a", id="source")
 
         with Collapsible(title="Lecture options", collapsed=True):
             yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
@@ -209,8 +209,8 @@ class LectureSetupApp(FormApp[RunOptions]):
         self.error_field = "source"
         source_value = self.query_one("#source", Input).value.strip()
         if not source_value:
-            raise LectureUtilError("Enter a lecture URL.")
-        url = read_urls(source_value, None)[0]
+            raise LectureUtilError("Enter a lecture URL or local media path.")
+        source = resolve_source(source_value)
 
         self.error_field = "lecture-date"
         lecture_date = validate_lecture_date(
@@ -262,7 +262,8 @@ class LectureSetupApp(FormApp[RunOptions]):
         raw_tags = self.query_one("#tags", Input).value.strip()
         llm_model = self.selected_model()
         return RunOptions(
-            url=url,
+            url=source.location,
+            source=source,
             course=course_name,
             lecture_date=lecture_date,
             semester_start=semester_start,

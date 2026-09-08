@@ -1,6 +1,6 @@
 # lecture-util
 
-공개 `.m3u8` 강의를 다운로드하고 로컬 Whisper로 전사한 뒤, 전사문과 학습 노트를 개인 Obsidian Vault에 발행하는 도구입니다.
+공개 `.m3u8` 강의를 다운로드하거나 로컬 영상·녹음 파일을 불러와 로컬 Whisper로 전사한 뒤, 전사문과 학습 노트를 개인 Obsidian Vault에 발행하는 도구입니다.
 
 - `yt-dlp`로 HLS 영상을 MP4로 다운로드
 - `ffmpeg`로 16 kHz mono WAV 추출
@@ -145,7 +145,7 @@ uv run lecture-util
 | Course | Vault에서 자동 탐색한 과목 선택지 |
 | Lecture date | 강의 날짜. 기본값은 프로그램을 실행한 주의 월요일이며 `YYYY-MM-DD` 형식으로 수정 가능 |
 | Lecture title | 파일명과 노트 제목에 사용할 강의 제목 |
-| Public `.m3u8` URL | 인증 없이 접근 가능한 HLS 재생목록 URL |
+| HLS URL or local media path | 공개 HLS URL 또는 로컬 영상·녹음 파일 경로 |
 
 제목은 앞뒤 공백을 제거한 뒤 사용합니다. 빈 제목, `.`과 `..`, `/`, `\`, 개행 또는 NUL 문자가 포함된 제목은 거부됩니다.
 
@@ -490,3 +490,29 @@ uv build
 - [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - [Codex 비대화형 실행](https://learn.chatgpt.com/docs/non-interactive-mode)
+
+
+### 로컬 영상·녹음 처리
+
+기존 파일도 과목·주차별 전사문과 요약 노트로 발행할 수 있습니다.
+
+```bash
+uv run lecture-util './강의 녹음.m4a'
+uv run lecture-util run './강의 영상.mp4' \
+  --course '공기역학특론' --date 2026-09-07 --title '첫 강의'
+```
+
+인자 없이 실행한 폼에서도 URL 대신 파일 경로를 입력할 수 있습니다.
+상대 경로, `~`, 공백 및 한글 경로를 지원합니다. 셸에서는 공백이 있는 경로를
+따옴표로 감싸세요. 실제 미디어 스트림을 `ffprobe`로 검사하므로 확장자와 무관하게
+설치된 FFmpeg가 읽을 수 있는 영상·녹음을 지원합니다. 앨범 표지는 영상으로
+분류하지 않으며, 오디오 스트림이 없는 영상은 오류로 처리합니다.
+
+로컬 영상은 다운로드 없이 오디오 추출부터, 녹음은 16 kHz 모노 WAV 정규화부터
+시작하여 전사·요약·Vault 발행을 수행합니다. `ffmpeg`와 `ffprobe`가 필요하며
+둘 다 일반적인 FFmpeg 설치에 포함됩니다. 로컬 처리에는 `yt-dlp`가 필요하지 않습니다.
+
+원본 파일은 현재 위치에 그대로 유지하며, 노트에 절대 경로를 기록합니다.
+중간 산출물은 캐시에 저장합니다. 경로와 파일 내용으로 캐시를 구분하므로
+같은 경로의 내용이 바뀌면 새로 처리합니다. `--force`는 캐시를 다시 처리하지만
+원본이나 기존 Vault 노트를 덮어쓰지 않습니다. 기존 노트가 있으면 제목을 바꾸세요.

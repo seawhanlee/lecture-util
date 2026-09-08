@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
+from lecture_util.models import LectureSource
 from lecture_util.errors import CommandError, DependencyError, LectureUtilError
 
 
@@ -81,7 +84,7 @@ def download_hls(url: str, destination: Path) -> None:
 def extract_audio(video: Path, destination: Path) -> None:
     ffmpeg = require_executable("ffmpeg")
     if not video.is_file():
-        raise LectureUtilError(f"Video file does not exist: {video}")
+        raise LectureUtilError(f"Media file does not exist: {video}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.stem}.extract{destination.suffix}")
     if temporary.exists():
@@ -110,3 +113,41 @@ def extract_audio(video: Path, destination: Path) -> None:
     if not temporary.exists():
         raise CommandError("ffmpeg completed without creating the expected audio file.")
     temporary.replace(destination)
+
+
+def resolve_source(value: str) -> LectureSource:
+    """Validate a URL or inspect local streams without modifying the source."""
+    if value.lower().startswith(("http://", "https://")):
+        validate_hls_url(value)
+        return LectureSource("hls", value)
+    path = Path(value).expanduser().resolve()
+    if not path.is_file():
+        raise LectureUtilError(f"Media file does not exist: {path}")
+    try:
+        with path.open("rb") as stream:
+            fingerprint = hashlib.file_digest(stream, "sha256").hexdigest()
+    except OSError as error:
+        raise LectureUtilError(f"Cannot read media file: {path}: {error}") from error
+    probe = require_executable("ffprobe")
+    require_executable("ffmpeg")
+    try:
+        result = subprocess.run(
+            [probe, "-v", "error", "-show_streams", "-of", "json", str(path)],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError as error:
+        raise CommandError(f"Could not inspect media: {error}") from error
+    if result.returncode:
+        raise LectureUtilError(f"Cannot decode media file: {path}\n{result.stderr[-2000:]}")
+    try:
+        streams = json.loads(result.stdout)["streams"]
+        if not any(item.get("codec_type") == "audio" for item in streams):
+            raise LectureUtilError(f"Media file has no audio stream: {path}")
+        video = any(
+            item.get("codec_type") == "video"
+            and not item.get("disposition", {}).get("attached_pic", 0)
+            for item in streams
+        )
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise LectureUtilError(f"Invalid media inspection result: {path}") from error
+    return LectureSource("video" if video else "audio", str(path), fingerprint)

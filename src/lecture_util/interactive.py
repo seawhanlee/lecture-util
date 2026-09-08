@@ -13,6 +13,7 @@ from rich.text import Text
 from lecture_util.configuration import AppConfig
 from lecture_util.errors import LectureUtilError
 from lecture_util.models import RunOptions
+from lecture_util.media import resolve_source
 from lecture_util.summary import DEFAULT_PROMPT
 from lecture_util.vault import (
     discover_courses,
@@ -38,6 +39,7 @@ def _ask_validated(console: Console, label: str, validate: Callable[[str], T],
 
 
 def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions | None:
+    source = resolve_source(url)
     courses = discover_courses(config.vault_root)
     table = Table(title="Choose a course")
     table.add_column("Number", justify="right")
@@ -87,9 +89,10 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
     )
     preview = Table(title="Lecture settings", show_header=False)
     for label, value in (
-        ("URL", url), ("Course", course.name), ("Week", str(week)),
+        ("Source", source.location), ("Course", course.name), ("Week", str(week)),
         ("Date", lecture_date), ("Title", title),
-        ("Note", str(paths.summary)), ("Video", str(video)),
+        ("Note", str(paths.summary)), ("Video" if source.kind == "hls" else "Original media",
+                                      str(video) if source.kind == "hls" else source.location),
         ("Transcription", f"{config.whisper_model} · {config.device} · {config.language}"),
         ("Codex model", config.llm_model or "Codex default"),
         ("Thinking effort", config.reasoning_effort or "Codex default"),
@@ -99,7 +102,7 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
     if not Confirm.ask("Start processing?", default=True, console=console):
         return None
     return RunOptions(
-        url=url, course=course.name, lecture_date=lecture_date, title=title,
+        source=source, url=source.location, course=course.name, lecture_date=lecture_date, title=title,
         semester_start=config.semester_start, llm_model=config.llm_model,
         reasoning_effort=config.reasoning_effort, tags=None,
         whisper_model=config.whisper_model, language=config.language,

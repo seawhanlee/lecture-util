@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from lecture_util.models import LecturePaths
+from lecture_util.models import LecturePaths, LectureSource
 
 
 def utc_now() -> str:
@@ -120,6 +120,7 @@ def create_workspace(
     output_dir: Path,
     *,
     video_path: Path | None = None,
+    source: LectureSource | None = None,
     title: str | None = None,
     course: str | None = None,
     lecture_date: str | None = None,
@@ -128,11 +129,11 @@ def create_workspace(
     tags: list[str] | None = None,
 ) -> tuple[LecturePaths, RunState]:
     paths = LecturePaths(
-        output_dir / f"lecture-{lecture_id(url)}",
+        output_dir / f"lecture-{lecture_id(source.cache_key if source else url)}",
         video_path=video_path,
     )
     paths.root.mkdir(parents=True, exist_ok=True)
-    return paths, RunState(
+    state = RunState(
         paths,
         url=url,
         title=title,
@@ -142,3 +143,11 @@ def create_workspace(
         published_transcript=published_transcript,
         tags=tags,
     )
+
+    if source is not None:
+        state.data["source"] = {
+            "kind": source.kind, "location": source.location,
+            "content_hash": source.content_hash,
+        }
+        state.save()
+    return paths, state

@@ -27,7 +27,7 @@ from lecture_util.console_progress import ConsoleProgressReporter
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
 from lecture_util.interactive import prompt_lecture
-from lecture_util.media import validate_hls_url
+from lecture_util.media import resolve_source, validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
 from lecture_util.pipeline import audio_stage, download_stage, run_lecture, transcription_stage
@@ -56,7 +56,13 @@ class LectureCommandGroup(TyperGroup):
     def resolve_command(
         self, ctx: click.Context, args: list[str],
     ) -> tuple[str | None, click.Command | None, list[str]]:
-        if args and args[0].lower().startswith(("https://", "http://")):
+        if args and (
+            args[0].lower().startswith(("https://", "http://"))
+            or (not args[0].startswith("-")
+                and self.get_command(ctx, args[0]) is None
+                and (Path(args[0]).expanduser().is_file()
+                     or "/" in args[0] or bool(Path(args[0]).suffix)))
+        ):
             return "interactive", self.get_command(ctx, "interactive"), args
         return super().resolve_command(ctx, args)
 
@@ -102,6 +108,7 @@ def _execute_run(
         semester_start=semester_start,
     )
     ensure_paths_available(published)
+    source = options.source or resolve_source(options.url)
     video = lecture_video_path(
         video_root or default_cache_root(),
         course,
@@ -115,15 +122,18 @@ def _execute_run(
     )
     started = monotonic()
     with ConsoleProgressReporter(
-        ("download", "audio", "transcription", "summary"), console=console,
+        (("download", "audio", "transcription", "summary")
+         if source.kind == "hls" else ("audio", "transcription", "summary")),
+        console=console,
         lecture_label=f"{course.name} · {lecture_date} {title}",
-        source_url=options.url,
+        source_url=source.location,
     ) as progress:
         paths = run_lecture(
-            options.url,
+            source.location,
             cache_root or default_cache_root(),
             summarizer,
-            video_path=video,
+            video_path=video if source.kind == "hls" else None,
+            source=source,
             title=title,
             course=course.name,
             lecture_date=lecture_date,
@@ -142,7 +152,7 @@ def _execute_run(
             course=course,
             lecture_date=lecture_date,
             title=title,
-            url=options.url,
+            url=source.location,
             summary=paths.summary.read_text(encoding="utf-8"),
             transcript=paths.transcript_markdown.read_text(encoding="utf-8"),
         )
@@ -151,9 +161,10 @@ def _execute_run(
             ("Complete", "bold green"),
             f" {published.summary} ({format_duration(monotonic() - started)})",
         ),
-        highlight=False,
+        highlight=False, soft_wrap=True,
     )
-    console.print(Text(f"Video: {video}"), highlight=False)
+    label = f"Video: {video}" if source.kind == "hls" else f"Source: {source.location}"
+    console.print(Text(label), highlight=False, soft_wrap=True)
 
 
 def _interactive_terminal() -> bool:
@@ -164,7 +175,7 @@ def _interactive_terminal() -> bool:
 def root_callback(ctx: typer.Context) -> None:
     """Download, transcribe, and summarize LMS lectures.
 
-    Pass a public .m3u8 URL directly to choose a course and week interactively.
+    Pass a public .m3u8 URL or local media path directly to choose a course and week interactively.
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -196,15 +207,15 @@ def root_callback(ctx: typer.Context) -> None:
 
 
 @app.command("interactive", hidden=True)
-def interactive_command(url: str = typer.Argument(..., help="Public .m3u8 URL")) -> None:
-    """Choose lecture metadata with Rich prompts for a supplied URL."""
+def interactive_command(url: str = typer.Argument(..., metavar="SOURCE", help="Public .m3u8 URL or local media path")) -> None:
+    """Choose lecture metadata for a URL or local media file."""
     try:
-        validate_hls_url(url)
+        source = resolve_source(url)
     except LectureUtilError as error:
         console.print(Text(str(error), style="red"))
         raise typer.Exit(2) from error
     if not _interactive_terminal():
-        console.print("A URL alone requires an interactive terminal. Use 'lecture-util run --help'.")
+        console.print("A source alone requires an interactive terminal. Use 'lecture-util run --help'.")
         raise typer.Exit(2)
 
     def action() -> None:
@@ -216,7 +227,7 @@ def interactive_command(url: str = typer.Argument(..., help="Public .m3u8 URL"))
                     console.print("Cancelled before setup.")
                     return
                 config = save_config(config)
-            options = prompt_lecture(url, config, console)
+            options = prompt_lecture(source.location, config, console)
         except (KeyboardInterrupt, EOFError):
             console.print("Cancelled before processing.")
             return
@@ -230,7 +241,7 @@ def interactive_command(url: str = typer.Argument(..., help="Public .m3u8 URL"))
 
 @app.command("run")
 def run_command(
-    url: str = typer.Argument(..., help="Public .m3u8 URL"),
+    url: str = typer.Argument(..., metavar="SOURCE", help="Public .m3u8 URL or local media path"),
     course: str = typer.Option(..., "--course", help="Course directory name"),
     lecture_date: str = typer.Option(..., "--date", help="Lecture date (YYYY-MM-DD)"),
     semester_start: str | None = typer.Option(
@@ -268,12 +279,13 @@ def run_command(
     prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    """Download, transcribe, and publish one lecture to the Obsidian vault."""
+    """Process a URL or local media file and publish one lecture to the Obsidian vault."""
 
     def action() -> None:
         config = load_config(required=True)
         assert config is not None
-        validated_url = read_urls(url, None)[0]
+        source = resolve_source(url)
+        validated_url = source.location
         selected_prompt = resolve_prompt(prompt, prompt_file)
         selected_llm_model = (
             config.llm_model
@@ -283,6 +295,7 @@ def run_command(
         _execute_run(
             RunOptions(
                 url=validated_url,
+                source=source,
                 course=course,
                 lecture_date=lecture_date,
                 semester_start=semester_start or config.semester_start,

@@ -339,3 +339,25 @@ class TuiInteractionTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LocalMediaTuiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_source_validation_preserves_input(self) -> None:
+        from lecture_util.models import LectureSource
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = configured_app(vault)
+            async with app.run_test(size=(100, 40)):
+                path = str(vault / '없는 녹음.m4a')
+                app.query_one('#source', Input).value = path
+                app._submit()
+                self.assertEqual(app.error_field, 'source')
+                self.assertEqual(app.query_one('#source', Input).value, path)
+                app.query_one('#lecture-title', Input).value = '녹음 강의'
+                app.query_one('#lecture-date', Input).value = '2026-09-07'
+                source = LectureSource('audio', path, 'hash')
+                with patch('lecture_util.tui.resolve_source', return_value=source):
+                    options = app._build_options()
+                self.assertEqual(options.source, source)
+                self.assertEqual(options.url, path)

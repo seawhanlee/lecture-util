@@ -4,8 +4,8 @@ from pathlib import Path
 from time import monotonic
 
 from lecture_util.errors import LectureUtilError
-from lecture_util.media import download_hls, extract_audio, tool_version
-from lecture_util.models import LecturePaths, Transcript
+from lecture_util.media import download_hls, extract_audio, resolve_source, tool_version
+from lecture_util.models import LecturePaths, LectureSource, Transcript
 from lecture_util.progress import ProgressCallback, format_duration, format_size, report
 from lecture_util.state import RunState, create_workspace
 from lecture_util.summarizers import Summarizer
@@ -74,14 +74,18 @@ def audio_stage(
             progress,
             "audio",
             "cached",
-            f"Reusing extracted audio ({format_size(paths.audio.stat().st_size)})",
+            f"Reusing prepared audio ({format_size(paths.audio.stat().st_size)})",
         )
         return
+    source = state.data.get("source", {})
+    local = source.get("kind") in {"audio", "video"}
+    input_path = Path(source["location"]) if local else paths.video
+    verb = "Normalizing" if source.get("kind") == "audio" else "Extracting"
     started = monotonic()
-    report(progress, "audio", "start", "Extracting 16 kHz mono audio")
+    report(progress, "audio", "start", f"{verb} 16 kHz mono audio")
     state.start_stage("audio")
     try:
-        extract_audio(paths.video, paths.audio)
+        extract_audio(input_path, paths.audio)
     except BaseException as error:
         state.fail_stage("audio", error)
         report(
@@ -96,7 +100,7 @@ def audio_stage(
         progress,
         "audio",
         "complete",
-        f"Extracted {format_size(paths.audio.stat().st_size)} "
+        f"Prepared {format_size(paths.audio.stat().st_size)} "
         f"in {format_duration(monotonic() - started)}",
     )
 
@@ -194,6 +198,7 @@ def prepare_lecture(
     output_dir: Path,
     *,
     video_path: Path | None = None,
+    source: LectureSource | None = None,
     title: str | None = None,
     course: str | None = None,
     lecture_date: str | None = None,
@@ -206,10 +211,12 @@ def prepare_lecture(
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> tuple[LecturePaths, RunState, Transcript]:
+    source = source or resolve_source(url)
     paths, state = create_workspace(
         url,
         output_dir,
         video_path=video_path,
+        source=source,
         title=title,
         course=course,
         lecture_date=lecture_date,
@@ -217,7 +224,8 @@ def prepare_lecture(
         published_transcript=published_transcript,
         tags=tags,
     )
-    download_stage(paths, state, force=force, progress=progress)
+    if source.kind == "hls":
+        download_stage(paths, state, force=force, progress=progress)
     audio_stage(paths, state, force=force, progress=progress)
     transcript = transcription_stage(
         paths,
@@ -237,6 +245,7 @@ def run_lecture(
     summarizer: Summarizer,
     *,
     video_path: Path | None = None,
+    source: LectureSource | None = None,
     title: str | None = None,
     course: str | None = None,
     lecture_date: str | None = None,
@@ -254,6 +263,7 @@ def run_lecture(
         url,
         output_dir,
         video_path=video_path,
+        source=source,
         title=title,
         course=course,
         lecture_date=lecture_date,

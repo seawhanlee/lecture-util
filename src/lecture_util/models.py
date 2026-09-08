@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import InitVar, asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(slots=True)
@@ -83,3 +83,17 @@ class RunOptions:
     force: bool
     semester_start: str | None = None
     reasoning_effort: str | None = None
+    source: LectureSource | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LectureSource:
+    kind: Literal["hls", "video", "audio"]
+    location: str
+    content_hash: str | None = None
+
+    @property
+    def cache_key(self) -> str:
+        if self.kind == "hls":
+            return self.location
+        return f"local:{self.location}:{self.content_hash}"

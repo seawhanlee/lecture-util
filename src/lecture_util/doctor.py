@@ -16,7 +16,7 @@ class Check:
 
 def run_checks() -> list[Check]:
     checks: list[Check] = []
-    for executable in ("yt-dlp", "ffmpeg", "codex"):
+    for executable in ("yt-dlp", "ffmpeg", "ffprobe", "codex"):
         path = shutil.which(executable)
         checks.append(Check(executable, path is not None, path or "not found on PATH"))
 
