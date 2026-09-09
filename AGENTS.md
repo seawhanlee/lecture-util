@@ -63,4 +63,6 @@ Courses live directly under `<Vault>/10 Academics/Courses` and must contain exac
 
 ## Documentation
 
+Always update `README.md` in the same change whenever user-facing usage changes, including added, renamed, or removed flags, new features, changed defaults, configuration changes, or altered workflows. Treat the README update as required for completing the change.
+
 Keep `README.md` in Korean and these contributor instructions in English. When behavior changes, update the relevant usage section instead of appending unrelated features after the development section. Verify examples and defaults against the CLI, configuration, and tests; distinguish HLS downloads, local media processing, video-only mode, standalone cache commands, and full-run resume.
