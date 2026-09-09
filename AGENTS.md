@@ -8,6 +8,8 @@ Application code lives in `src/lecture_util/`. `cli.py` defines Typer commands, 
 
 `interactive.py` handles Rich prompts when a URL or local path is passed directly. `codex_models.py` discovers Codex models and supported reasoning efforts with a local cache fallback; keep model selection behavior in sync across onboarding and the lecture form.
 
+`recovery.py` persists complete run requests and validates resume inputs. `state.py` owns atomic state writes, fingerprints, and workspace locks; publication recovery records belong in `vault.py`. `benchmark.py` is an opt-in local transcription comparison tool, separate from normal lecture processing.
+
 Tests live in `tests/` and generally mirror module names, for example `tests/test_summary.py`. Directories such as `output/` or `lecture-util-test.*/` contain generated media, transcripts, summaries, and run state; treat them as artifacts, not source fixtures. Project metadata and dependencies are defined in `pyproject.toml`, with exact resolutions in `uv.lock`.
 
 ## Build, Test, and Development Commands
@@ -20,6 +22,8 @@ Tests live in `tests/` and generally mirror module names, for example `tests/tes
 - `uv run lecture-util run URL --course 'Course name' --date 2026-09-07 --title 'Lecture title'`: exercise the complete non-interactive pipeline after onboarding, using an existing course.
 - `uv run lecture-util run './lecture.m4a' --course 'Course name' --date 2026-09-07 --title 'Lecture title'`: transcribe and summarize a local recording or video without moving the original.
 - Add `--video-only` to `run URL ...` or `download URL ...` to save only the HLS video. Without this flag, `download` also extracts audio; standalone `transcribe` and `summarize` commands operate on a cache directory without publishing notes.
+- `uv run lecture-util resume LECTURE_DIR`: resume a recorded full run with its saved settings, paths, and prompt. Requires `request.json`; current global defaults are not reapplied.
+- `uv run python -m lecture_util.benchmark --help`: inspect the opt-in benchmark options. Actual benchmarks run real inference on explicitly supplied local audio and should not run as routine checks.
 - `uv run pytest -q`: run the full test suite, including the local HLS/FFmpeg integration test.
 - `uv build`: create distributable wheel and source archives.
 
@@ -37,6 +41,10 @@ Existing tests also use `unittest.TestCase` and `tempfile.TemporaryDirectory`; f
 
 For source or pipeline changes, cover local audio/video detection, content-based cache invalidation, preserved originals, and failure recovery. Preserve the video-only path: it rejects local inputs and skips audio extraction, model processing, and note publication, even when Vault notes already exist. For download progress changes, cover throttled speed updates, finalization, and subprocess cleanup on cancellation. Mock model discovery and cache reads in model-picker tests.
 
+For recovery changes, cover request validation, changed or missing local sources, workspace locking, corrupt state, downstream invalidation, missing Markdown/SRT restoration, and partial publication recovery. Only recover a partially published note pair when the recorded content matches existing files; preserve user edits and reject completed-note conflicts. Cover TUI retry/edit/quit input restoration and cancellation exit code 130.
+
+Keep transcription defaults consistent across onboarding, the lecture form, `run`, and standalone `transcribe`; standalone `summarize` also inherits saved model and reasoning effort. Explicit options override saved settings. Cover compute type, batch size, beam reset (`--beam-size default`), MLX restrictions, and preflight checks without downloading models. Mock inference in progress and benchmark tests; benchmark metrics must distinguish measured values from unavailable data.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses concise Conventional Commit prefixes such as `feat:`, `fix:`, `refactor:`, and `docs:`. Write imperative, narrowly scoped subjects. Pull requests should explain the motivation, summarize behavior changes, list verification commands, and note platform assumptions (macOS/MLX or Linux/CUDA). Link relevant issues and include terminal output or screenshots when CLI presentation changes.
@@ -49,6 +57,10 @@ Only process lecture URLs the user is authorized to download. Do not commit cred
 
 Supported inputs are public HLS `.m3u8` URLs and local video/audio files readable by FFmpeg; authenticated LMS URLs requiring login or cookies are unsupported. Local inputs require an audio stream, and attached album art must not count as video. Keep local originals in place and unchanged; their cache identity includes the resolved path and content hash. Store downloaded HLS videos under the configured video root.
 
-Settings live in `$XDG_CONFIG_HOME/lecture-util/config.json` (default `~/.config/lecture-util/config.json`), and intermediate artifacts use the user cache outside the Vault. Keep model, reasoning-effort, and prompt changes reflected in summary cache invalidation. `--force` reruns cached stages but must not overwrite local originals or existing Vault notes.
+Settings live in `$XDG_CONFIG_HOME/lecture-util/config.json` (default `~/.config/lecture-util/config.json`), and intermediate artifacts use the user cache outside the Vault. Keep model, reasoning-effort, and prompt changes reflected in summary cache invalidation. Transcription cache identity must include model, language, device, compute type, batch size, beam size, and runtime platform. Treat `request.json` and `publication.json` as private generated artifacts: they contain prompts, paths, and note content. Resume validates the original source identity and does not repeat the saved `force` flag. `--force` reruns cached stages but must not overwrite local originals or existing Vault notes.
 
 Courses live directly under `<Vault>/10 Academics/Courses` and must contain exactly one of `Lecture` or `Lectures`. Preserve this discovery contract: publication may create week folders, but must not silently create course or lecture directories. Keep note destination conflict checks before full lecture processing and avoid overwriting existing user notes. Video-only downloads do not publish notes or check note conflicts; existing videos still require a matching completed download record for reuse or explicit `--force` for replacement.
+
+## Documentation
+
+Keep `README.md` in Korean and these contributor instructions in English. When behavior changes, update the relevant usage section instead of appending unrelated features after the development section. Verify examples and defaults against the CLI, configuration, and tests; distinguish HLS downloads, local media processing, video-only mode, standalone cache commands, and full-run resume.

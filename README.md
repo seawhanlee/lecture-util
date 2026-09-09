@@ -16,7 +16,7 @@
 
 1. Vault에 과목 폴더와 `Lecture` 또는 `Lectures` 폴더를 미리 만듭니다.
 2. 의존성을 설치하고 환경을 점검합니다.
-3. 인자 없이 실행하여 최초 온보딩을 완료한 뒤 과목, 날짜, 제목과 URL을 입력합니다.
+3. 인자 없이 실행하여 최초 온보딩을 완료한 뒤 과목, 날짜, 제목과 HLS URL 또는 로컬 파일 경로를 입력합니다.
 
 ```bash
 uv sync --dev
@@ -46,8 +46,8 @@ N주차/
 
 - Python 3.12 이상
 - [uv](https://docs.astral.sh/uv/)
-- `ffmpeg`
-- `yt-dlp`
+- `ffmpeg`와 `ffprobe`
+- HLS 다운로드에 필요한 `yt-dlp`
 - 로그인된 Codex CLI
 
 Codex 로그인을 포함한 Codex 자체 설정은 먼저 완료되어 있어야 합니다. 모델을 별도로 지정하지 않으면 Codex CLI에 설정된 기본 모델을 사용합니다.
@@ -89,6 +89,9 @@ uv run lecture-util doctor
 | Transcription device | `auto` | `auto`, `mlx`, `cuda`, `cpu` 중 선택 |
 | Whisper model | `large-v3` | 기본 Whisper 모델 이름 또는 경로 |
 | Lecture language | `auto` | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
+| Compute type | `auto` | faster-whisper 정밀도 |
+| Batch size | `0` | `0`은 비배치 처리, 양수는 배치 크기 |
+| Beam size | 빈 값 | 백엔드 기본값 사용 또는 양수 지정 |
 | Codex model | Codex 기본 설정 사용 | 설치된 Codex에서 조회한 모델을 드롭다운으로 선택 |
 | Thinking effort | Codex 기본 설정 사용 | 선택 모델의 추론 강도를 드롭다운으로 선택 |
 
@@ -161,9 +164,9 @@ uv run lecture-util
 | Transcription device | 온보딩 설정값 | `auto`, `mlx`, `cuda`, `cpu` 중 직접 선택 가능 |
 | Whisper model | 온보딩 설정값 | Whisper 모델 이름 또는 지원되는 모델 경로 |
 | Lecture language | 온보딩 설정값 | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
-| Compute type | `auto` | faster-whisper의 정밀도. CUDA는 FP16, CPU는 INT8이 기본 |
-| Batch size | `0` | `0`은 기존 비배치 처리, 양수는 배치 크기 |
-| Beam size | 빈 값 | faster-whisper 기본값 5. 양수로 직접 지정 가능 |
+| Compute type | 온보딩 설정값 (`auto`) | faster-whisper의 정밀도. CUDA는 FP16, CPU는 INT8이 기본 |
+| Batch size | 온보딩 설정값 (`0`) | `0`은 기존 비배치 처리, 양수는 배치 크기 |
+| Beam size | 온보딩 설정값 (빈 값) | faster-whisper 기본값 5. 양수로 직접 지정 가능 |
 | Codex model | 온보딩 설정값 | 드롭다운에서 이번 강의에 사용할 모델 선택 |
 | Thinking effort | 온보딩 설정값 | 이번 강의에 사용할 추론 강도 선택 |
 | Summary prompt | 기본 프롬프트 | 직접 입력하거나 Markdown/text 파일에서 읽기 |
@@ -209,7 +212,7 @@ Complete <Obsidian Vault>/10 Academics/Courses/공기역학특론/Lectures/1주�
 
 ## `run` 명령 사용법
 
-TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 URL, 과목, 날짜와 제목은 모두 필수입니다.
+TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 입력 소스(HLS URL 또는 로컬 파일 경로), 과목, 날짜와 제목은 모두 필수입니다.
 
 ```bash
 uv run lecture-util run \
@@ -251,7 +254,7 @@ uv run lecture-util run URL \
 
 `config`, `onboard`와 강의 실행 화면에서 `Thinking effort`를 선택할 수 있습니다. 선택한 모델의 지원 목록을 Codex 또는 로컬 캐시에서 읽어 표시합니다. 모델 변경 시 지원되지 않는 effort는 기본값으로 전환하며 안내를 표시합니다. 모델을 지정하지 않거나 지원 정보를 조회할 수 없으면 일반적인 effort 옵션과 지원 여부 미확인 안내를 표시합니다. `Use Codex configured default`는 effort를 별도로 지정하지 않습니다.
 
-`run`과 `summarize`에서는 `--reasoning-effort high`처럼 지정할 수도 있습니다. `run`은 저장된 effort를 기본값으로 사용하고 `--reasoning-effort ''`로 Codex 기본 설정을 사용할 수 있습니다. `summarize`는 기존 모델 옵션과 마찬가지로 생략 시 Codex 기본 설정을 사용합니다. effort가 달라지면 요약 캐시를 다시 생성합니다.
+`run`과 `summarize`에서는 `--reasoning-effort high`처럼 지정할 수도 있습니다. `run`은 저장된 effort를 기본값으로 사용하고 `--reasoning-effort ''`로 Codex 기본 설정을 사용할 수 있습니다. `summarize`도 생략 시 저장된 모델과 effort를 사용하며, `--llm-model ''`와 `--reasoning-effort ''`로 각각 Codex 기본 설정을 사용할 수 있습니다. effort가 달라지면 요약 캐시를 다시 생성합니다.
 
 온보딩과 강의 실행 화면에서 Codex 모델을 드롭다운으로 선택할 수 있습니다. `Use Codex configured default`는 Codex 자체 기본 설정을 사용합니다. 모델 목록은 화면을 연 뒤 자동으로 조회하며, 조회 실패 시 로컬 Codex 캐시를 사용하고 상태를 표시합니다. 캐시도 없으면 기본 설정과 기존 저장 모델을 선택할 수 있습니다. 온보딩에서 저장한 모델은 다음 실행의 기본값이고, 강의 실행 화면의 변경은 해당 실행에만 적용됩니다.
 
@@ -294,6 +297,61 @@ uv run lecture-util run URL \
 태그는 Vault 노트 frontmatter가 아니라 캐시의 `run.json`에만 저장됩니다.
 
 `--force`는 다운로드, 오디오 추출, 전사와 요약을 모두 다시 수행합니다. 기존 Vault 노트를 덮어쓰는 옵션은 아니므로 같은 날짜와 제목의 노트가 존재하면 `--force`를 사용해도 처리 전에 중단합니다.
+
+## 로컬 영상·녹음 처리
+
+기존 파일도 과목·주차별 전사문과 요약 노트로 발행할 수 있습니다.
+
+```bash
+uv run lecture-util './강의 녹음.m4a'
+uv run lecture-util run './강의 영상.mp4' \
+  --course '공기역학특론' --date 2026-09-07 --title '첫 강의'
+```
+
+인자 없이 실행한 폼에서도 URL 대신 파일 경로를 입력할 수 있습니다.
+상대 경로, `~`, 공백 및 한글 경로를 지원합니다. 셸에서는 공백이 있는 경로를
+따옴표로 감싸세요. 실제 미디어 스트림을 `ffprobe`로 검사하므로 확장자와 무관하게
+설치된 FFmpeg가 읽을 수 있는 영상·녹음을 지원합니다. 앨범 표지는 영상으로
+분류하지 않으며, 오디오 스트림이 없는 영상은 오류로 처리합니다.
+
+로컬 영상은 다운로드 없이 오디오 추출부터, 녹음은 16 kHz 모노 WAV 정규화부터
+시작하여 전사·요약·Vault 발행을 수행합니다. `ffmpeg`와 `ffprobe`가 필요하며
+둘 다 일반적인 FFmpeg 설치에 포함됩니다. 로컬 처리에는 `yt-dlp`가 필요하지 않습니다.
+
+원본 파일은 현재 위치에 그대로 유지하며, 노트에 절대 경로를 기록합니다.
+중간 산출물은 캐시에 저장합니다. 경로와 파일 내용으로 캐시를 구분하므로
+같은 경로의 내용이 바뀌면 새로 처리합니다. `--force`는 캐시를 다시 처리하지만
+원본이나 기존 Vault 노트를 덮어쓰지 않습니다. 기존 노트가 있으면 제목을 바꾸세요.
+
+
+## 영상만 다운로드
+
+전사·요약 없이 공개 HLS 영상을 MP4로 저장하려면 `--video-only`를 사용합니다.
+
+```bash
+uv run lecture-util run 'https://example.com/lecture/index.m3u8' \
+  --course '공기역학특론' --date 2026-09-07 --title '첫 강의' --video-only
+uv run lecture-util download 'https://example.com/lecture/index.m3u8' \
+  --course '공기역학특론' --title '첫 강의' --video-only
+```
+
+`download`에서 날짜를 생략하면 오늘 날짜를 사용합니다. `run`은 날짜가 필수입니다.
+URL만 전달하는 대화형 실행에서는 처리 모드에 `video`를 선택하고, TUI에서는
+`Download video only`를 선택합니다. 기본값은 전사·요약·Vault 저장입니다.
+로컬 파일 경로에서는 다운로드 전용 모드를 사용할 수 없습니다.
+
+영상은 설정된 동영상 저장소의 과목·주차 폴더에 저장하며 완료 화면에서 경로를
+확인할 수 있습니다. 오디오 추출·전사·요약·노트 발행은 수행하지 않고 다운로드
+상태만 캐시에 기록합니다. 기존 Vault 노트가 있어도 다운로드할 수 있습니다.
+기존 영상은 완료 기록이 일치하면 재사용하고, 그 외에는 `--force` 없이 덮어쓰지
+않습니다. 옵션 없는 `download`는 기존처럼 오디오 추출까지 수행합니다.
+
+
+다운로드 중에는 기존 진행 화면에 `Downloading · 3.2 MiB/s`처럼 속도가 표시됩니다.
+속도는 최대 초당 한 번 갱신되며, 측정값이 아직 없으면 `속도 계산 중`으로 표시됩니다.
+병합·후처리 중에는 속도 대신 `Finalizing downloaded video`가 표시됩니다.
+전체 강의 처리와 `--video-only`에 자동 적용되며, 캐시 재사용 시에는 기존
+`Cached` 표시를 유지합니다. 파일로 리디렉션한 로그에도 같은 갱신 주기를 적용합니다.
 
 ## 생성되는 파일
 
@@ -359,10 +417,10 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
 
 ### 사용자 캐시
 
-전체 실행의 작업공간은 URL의 SHA-256 해시 앞 10자를 사용합니다.
+전체 실행의 작업공간은 소스 식별자의 SHA-256 해시 앞 10자를 사용합니다. HLS는 URL, 로컬 파일은 해석된 절대 경로와 파일 내용 해시로 식별합니다.
 
 ```text
-~/.cache/lecture-util/lecture-<URL 해시>/
+~/.cache/lecture-util/lecture-<소스 해시>/
 ├── audio.wav
 ├── transcript.json
 ├── transcript.md
@@ -411,8 +469,10 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
 실행 오류에는 실패 단계, 캐시 위치와 다음 재개 명령이 표시됩니다.
 
 ```bash
-uv run lecture-util resume ~/.cache/lecture-util/lecture-<URL해시>
+uv run lecture-util resume "$HOME/.cache/lecture-util/lecture-0123456789"
 ```
+
+위 경로는 예시이며 오류 화면에 표시된 실제 캐시 경로로 바꾸세요. 로컬 원본이 없어졌거나 내용이 바뀌면 기존 요청을 재개할 수 없으므로 현재 파일로 새 `run`을 실행해야 합니다.
 
 재개는 저장된 모델·경로·강의 정보·프롬프트를 사용하며 현재 전역 설정을 다시 적용하지 않습니다.
 완료된 단계는 재사용하고, 강제 재실행 옵션은 반복하지 않습니다. 실패한 강제 다운로드의 파일 교체 권한은 해당 시도의 상태에 기록되어 재시도에 적용됩니다.
@@ -469,7 +529,7 @@ uv run lecture-util summarize LECTURE_DIR \
   --prompt-file prompts/exam-notes.md
 ```
 
-`LECTURE_DIR/transcript.json`과 `transcript.md`를 읽어 `summary.md`를 만듭니다. 이 명령 역시 Obsidian 노트를 발행하지 않으므로 최종 Vault 발행이 필요하면 같은 URL로 전체 `run` 명령을 실행하세요. 완료된 캐시 단계는 재사용됩니다.
+`LECTURE_DIR/transcript.json`과 `transcript.md`를 읽어 `summary.md`를 만듭니다. 이 명령 역시 Obsidian 노트를 발행하지 않으므로 최종 Vault 발행이 필요하면 같은 소스와 강의 정보로 전체 `run` 명령을 실행하거나, 기록된 전체 실행이 있다면 `resume`을 사용하세요. 완료된 캐시 단계는 재사용됩니다.
 
 ## 전사 최적화와 비교 측정
 
@@ -544,59 +604,3 @@ uv build
 - [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - [Codex 비대화형 실행](https://learn.chatgpt.com/docs/non-interactive-mode)
-
-
-### 로컬 영상·녹음 처리
-
-기존 파일도 과목·주차별 전사문과 요약 노트로 발행할 수 있습니다.
-
-```bash
-uv run lecture-util './강의 녹음.m4a'
-uv run lecture-util run './강의 영상.mp4' \
-  --course '공기역학특론' --date 2026-09-07 --title '첫 강의'
-```
-
-인자 없이 실행한 폼에서도 URL 대신 파일 경로를 입력할 수 있습니다.
-상대 경로, `~`, 공백 및 한글 경로를 지원합니다. 셸에서는 공백이 있는 경로를
-따옴표로 감싸세요. 실제 미디어 스트림을 `ffprobe`로 검사하므로 확장자와 무관하게
-설치된 FFmpeg가 읽을 수 있는 영상·녹음을 지원합니다. 앨범 표지는 영상으로
-분류하지 않으며, 오디오 스트림이 없는 영상은 오류로 처리합니다.
-
-로컬 영상은 다운로드 없이 오디오 추출부터, 녹음은 16 kHz 모노 WAV 정규화부터
-시작하여 전사·요약·Vault 발행을 수행합니다. `ffmpeg`와 `ffprobe`가 필요하며
-둘 다 일반적인 FFmpeg 설치에 포함됩니다. 로컬 처리에는 `yt-dlp`가 필요하지 않습니다.
-
-원본 파일은 현재 위치에 그대로 유지하며, 노트에 절대 경로를 기록합니다.
-중간 산출물은 캐시에 저장합니다. 경로와 파일 내용으로 캐시를 구분하므로
-같은 경로의 내용이 바뀌면 새로 처리합니다. `--force`는 캐시를 다시 처리하지만
-원본이나 기존 Vault 노트를 덮어쓰지 않습니다. 기존 노트가 있으면 제목을 바꾸세요.
-
-
-### 영상만 다운로드
-
-전사·요약 없이 공개 HLS 영상을 MP4로 저장하려면 `--video-only`를 사용합니다.
-
-```bash
-uv run lecture-util run 'https://example.com/lecture/index.m3u8' \
-  --course '공기역학특론' --date 2026-09-07 --title '첫 강의' --video-only
-uv run lecture-util download 'https://example.com/lecture/index.m3u8' \
-  --course '공기역학특론' --title '첫 강의' --video-only
-```
-
-`download`에서 날짜를 생략하면 오늘 날짜를 사용합니다. `run`은 날짜가 필수입니다.
-URL만 전달하는 대화형 실행에서는 처리 모드에 `video`를 선택하고, TUI에서는
-`Download video only`를 선택합니다. 기본값은 전사·요약·Vault 저장입니다.
-로컬 파일 경로에서는 다운로드 전용 모드를 사용할 수 없습니다.
-
-영상은 설정된 동영상 저장소의 과목·주차 폴더에 저장하며 완료 화면에서 경로를
-확인할 수 있습니다. 오디오 추출·전사·요약·노트 발행은 수행하지 않고 다운로드
-상태만 캐시에 기록합니다. 기존 Vault 노트가 있어도 다운로드할 수 있습니다.
-기존 영상은 완료 기록이 일치하면 재사용하고, 그 외에는 `--force` 없이 덮어쓰지
-않습니다. 옵션 없는 `download`는 기존처럼 오디오 추출까지 수행합니다.
-
-
-다운로드 중에는 기존 진행 화면에 `Downloading · 3.2 MiB/s`처럼 속도가 표시됩니다.
-속도는 최대 초당 한 번 갱신되며, 측정값이 아직 없으면 `속도 계산 중`으로 표시됩니다.
-병합·후처리 중에는 속도 대신 `Finalizing downloaded video`가 표시됩니다.
-전체 강의 처리와 `--video-only`에 자동 적용되며, 캐시 재사용 시에는 기존
-`Cached` 표시를 유지합니다. 파일로 리디렉션한 로그에도 같은 갱신 주기를 적용합니다.
