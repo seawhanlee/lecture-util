@@ -121,9 +121,9 @@ class FormApp(App[T]):
     #preview-content { width: 100%; height: auto; }
     .field-label { margin-top: 1; color: $text-muted; }
     Input, Select { width: 100%; }
-    Input { border: tall $surface-lighten-2; }
+    Input { border: tall ansi_bright_black; }
     Input:focus { border: tall $accent; }
-    TextArea { height: 7; border: round $surface-lighten-2; }
+    TextArea { height: 7; border: round ansi_bright_black; }
     Collapsible { margin-top: 1; padding: 0; border: none; }
     .invalid { border: tall $error; }
     #error { display: none; width: 120; max-width: 100%; height: auto;
@@ -138,6 +138,11 @@ class FormApp(App[T]):
     .compact .field-label { margin-top: 0; }
     .compact #actions { padding: 0 1; }
     """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Preserve terminal palette indices and its default foreground/background.
+        self.theme = "ansi-dark"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="header"):
