@@ -264,6 +264,43 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TuiInteractionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_arrows_leave_processing_mode_after_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(120, 40)) as pilot:
+                app.query_one("#source", Input).value = URL
+                await pilot.pause()
+                mode = app.query_one("#processing-mode", Select)
+                for confirm in ("enter", "space"):
+                    with self.subTest(confirm=confirm):
+                        mode.value = "full"
+                        mode.focus()
+                        await pilot.press(confirm, "down")
+                        self.assertTrue(mode.expanded)
+                        await pilot.press(confirm)
+                        self.assertEqual(mode.value, "video")
+                        self.assertFalse(mode.expanded)
+                        self.assertIs(app.focused, mode)
+
+                        await pilot.press("up")
+                        self.assertEqual(app.focused.id, "source")
+                        self.assertFalse(mode.expanded)
+
+                        mode.focus()
+                        await pilot.press("tab")
+                        next_field = app.focused
+                        mode.focus()
+                        await pilot.press("down")
+                        self.assertIs(app.focused, next_field)
+                        self.assertFalse(mode.expanded)
+
+                        mode.focus()
+                        await pilot.press(confirm, "up", confirm)
+                        self.assertEqual(mode.value, "full")
+                        self.assertFalse(mode.expanded)
+
     async def test_enter_selects_and_escape_only_closes_dropdown(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             vault = Path(directory)

@@ -95,7 +95,11 @@ class CodexModelPicker(Vertical):
 
 
 class FormApp(App[T]):
-    BINDINGS = [Binding("space", "select_option", show=False, priority=True)]
+    BINDINGS = [
+        Binding("space", "select_option", show=False, priority=True),
+        Binding("up", "leave_select('previous')", show=False, priority=True),
+        Binding("down", "leave_select('next')", show=False, priority=True),
+    ]
     ENABLE_COMMAND_PALETTE = False
     heading = "lecture-util"
     description = ""
@@ -242,9 +246,17 @@ class FormApp(App[T]):
         if isinstance(self.focused, OptionList):
             self.focused.action_select()
 
+    def action_leave_select(self, direction: str) -> None:
+        if direction == "previous":
+            self.screen.focus_previous()
+        else:
+            self.screen.focus_next()
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action == "select_option":
             return isinstance(self.focused, OptionList)
+        if action == "leave_select":
+            return isinstance(self.focused, Select) and not self.focused.expanded
         return super().check_action(action, parameters)
 
     def action_cancel(self) -> None:

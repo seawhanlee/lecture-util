@@ -103,7 +103,8 @@ class LectureSetupApp(FormApp[RunOptions]):
 
         yield Select(
             [("Transcribe, summarize and publish", "full"), ("Download video only", "video")],
-            value="full", allow_blank=False, id="processing-mode", disabled=True,
+            value="full", allow_blank=False, type_to_search=False,
+            id="processing-mode", disabled=True,
         )
 
         with Collapsible(title="Lecture options", collapsed=True):
