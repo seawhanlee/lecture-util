@@ -20,6 +20,19 @@ def run_checks() -> list[Check]:
         path = shutil.which(executable)
         checks.append(Check(executable, path is not None, path or "not found on PATH"))
 
+    from lecture_util.configuration import load_config
+    from lecture_util.errors import LectureUtilError
+    try:
+        config = load_config(validate_vault=False)
+        if config is not None and config.transcription_provider == "openai":
+            from lecture_util.api_transcription import preflight_openai
+            preflight_openai()
+            checks.append(Check("OpenAI transcription", True, f"{config.openai_transcription_model}; key available (no API request made)"))
+            return checks
+    except LectureUtilError as error:
+        checks.append(Check("Transcription configuration", False, str(error)))
+        return checks
+
     system = platform.system()
     machine = platform.machine().lower()
     checks.append(Check("platform", True, f"{system} {machine}"))

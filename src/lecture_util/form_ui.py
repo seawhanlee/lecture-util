@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from lecture_util.configuration import AppConfig
+    from lecture_util.models import RunOptions
 
 from textual import events
 from textual.app import App, ComposeResult
@@ -301,7 +305,7 @@ class TranscriptionTuning(Vertical):
             self.query_one("#batch-size", Input).value = "0"
             self.query_one("#beam-size", Input).value = ""
 
-    def values(self) -> dict:
+    def values(self) -> dict[str, Any]:
         try:
             batch = int(self.query_one("#batch-size", Input).value)
         except ValueError as error:
@@ -315,3 +319,113 @@ class TranscriptionTuning(Vertical):
             raise LectureUtilError("Beam size must be a positive integer or blank.") from error
         return dict(compute_type=self.query_one("#compute-type", Select).value,
                     batch_size=batch, beam_size=beam)
+
+
+class TranscriptionSettings(Vertical):
+    """Shared platform/model fields; API secrets are never part of values()."""
+
+    DEFAULT_CSS = """
+    TranscriptionSettings { height: auto; }
+    #local-transcription, #api-transcription, #api-credentials { height: auto; }
+    """
+
+    def __init__(self, initial: AppConfig | RunOptions, *, credentials: bool = False) -> None:
+        super().__init__()
+        self.initial = initial
+        self.edit_credentials = credentials
+        self._status_loaded = False
+
+    def compose(self) -> ComposeResult:
+        from lecture_util.configuration import OPENAI_TRANSCRIPTION_MODELS
+        yield Label("Transcription platform", classes="field-label")
+        yield Select([("Local Whisper", "local"), ("OpenAI API", "openai")],
+                     value=self.initial.transcription_provider, allow_blank=False,
+                     id="transcription-provider")
+        with Vertical(id="local-transcription"):
+            yield Label("Transcription device", classes="field-label")
+            yield Select([("Auto", "auto"), ("Apple MLX", "mlx"),
+                          ("NVIDIA CUDA", "cuda"), ("CPU", "cpu")],
+                         value=self.initial.device, allow_blank=False, id="device")
+            yield Label("Whisper model", classes="field-label")
+            yield Input(value=self.initial.whisper_model, id="whisper-model")
+            yield TranscriptionTuning(self.initial.compute_type, self.initial.batch_size, self.initial.beam_size)
+        with Vertical(id="api-transcription"):
+            yield Label("OpenAI transcription model", classes="field-label")
+            yield Select([(model, model) for model in OPENAI_TRANSCRIPTION_MODELS],
+                         value=self.initial.openai_transcription_model, allow_blank=False,
+                         id="openai-transcription-model")
+            yield Label("", id="transcription-output", markup=False)
+            yield Label("Audio is sent to OpenAI. API usage is billed separately.", markup=False)
+            if self.edit_credentials:
+                with Vertical(id="api-credentials"):
+                    yield Label("", id="api-key-status", markup=False)
+                    yield Label("OpenAI API key (blank: keep stored key)", classes="field-label")
+                    yield Input(password=True, id="openai-api-key")
+                    yield Checkbox("Delete stored OpenAI API key on save", id="delete-api-key")
+            else:
+                yield Label("Manage the API key with lecture-util config.", markup=False)
+        yield Label("Lecture language", classes="field-label")
+        yield Input(value=self.initial.language, id="language")
+
+    def on_mount(self) -> None:
+        self.update_platform()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id in {"transcription-provider", "openai-transcription-model"}:
+            self.update_platform()
+
+    def update_platform(self) -> None:
+        api = self.query_one("#transcription-provider", Select).value == "openai"
+        self.query_one("#local-transcription").display = not api
+        self.query_one("#api-transcription").display = api
+        model = self.query_one("#openai-transcription-model", Select).value
+        self.query_one("#transcription-output", Label).update(
+            "Segment timestamps and SRT subtitles." if model == "whisper-1"
+            else "Transcript text and notes; no timestamps or SRT subtitles."
+        )
+        if api and self.edit_credentials and not self._status_loaded:
+            from lecture_util.credentials import credential_status
+            self.query_one("#api-key-status", Label).update(credential_status())
+            self._status_loaded = True
+
+    def values(self) -> dict[str, Any]:
+        from lecture_util.configuration import validate_transcription_options
+        from lecture_util.models import TranscriptionOptions
+        provider = str(self.query_one("#transcription-provider", Select).value)
+        model = str(self.query_one("#openai-transcription-model", Select).value)
+        whisper = self.query_one("#whisper-model", Input).value.strip()
+        language = self.query_one("#language", Input).value.strip()
+        device = str(self.query_one("#device", Select).value)
+        try:
+            tuning = self.query_one(TranscriptionTuning).values()
+        except LectureUtilError:
+            if provider == "local":
+                raise
+            tuning = dict(compute_type=self.initial.compute_type, batch_size=self.initial.batch_size,
+                          beam_size=self.initial.beam_size)
+        if provider == "openai":
+            whisper = whisper or self.initial.whisper_model
+        validate_transcription_options(TranscriptionOptions(
+            whisper, language, device, **tuning,
+            transcription_provider=provider, openai_transcription_model=model,
+        ))
+        return dict(whisper_model=whisper, language=language, device=device, **tuning,
+                    transcription_provider=provider, openai_transcription_model=model)
+
+    def preview(self) -> str:
+        api = self.query_one("#transcription-provider", Select).value == "openai"
+        if api:
+            return f"OpenAI · {self.query_one('#openai-transcription-model', Select).value}"
+        return f"{self.query_one('#device', Select).value} · {self.query_one('#whisper-model', Input).value}"
+
+    def save_credentials(self) -> None:
+        if not self.edit_credentials:
+            return
+        from lecture_util.credentials import save_api_key
+        delete = self.query_one("#delete-api-key", Checkbox).value
+        value = self.query_one("#openai-api-key", Input).value
+        if delete and value.strip():
+            self.app.error_field = "openai-api-key"
+            raise LectureUtilError("Choose either a replacement API key or deletion.")
+        self.app.error_field = "openai-api-key"
+        save_api_key(value, delete=delete)

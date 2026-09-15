@@ -100,7 +100,7 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
         ("Date", lecture_date), ("Title", title),
         ("Note", str(paths.summary)), ("Video" if source.kind == "hls" else "Original media",
                                       str(video) if source.kind == "hls" else source.location),
-        ("Transcription", f"{config.whisper_model} · {config.device} · {config.language}"),
+        ("Transcription", f"{config.transcription_provider} · {config.openai_transcription_model if config.transcription_provider == 'openai' else config.whisper_model} · {config.language}"),
         ("Codex model", config.llm_model or "Codex default"),
         ("Thinking effort", config.reasoning_effort or "Codex default"),
     ):
@@ -113,6 +113,8 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
         video_only=video_only, source=source, url=source.location, course=course.name, lecture_date=lecture_date, title=title,
         semester_start=config.semester_start, llm_model=config.llm_model,
         reasoning_effort=config.reasoning_effort, tags=None,
+        transcription_provider=config.transcription_provider,
+        openai_transcription_model=config.openai_transcription_model,
         whisper_model=config.whisper_model, language=config.language,
         compute_type=config.compute_type, batch_size=config.batch_size, beam_size=config.beam_size,
         device=config.device, prompt=DEFAULT_PROMPT, force=False,

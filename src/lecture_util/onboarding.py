@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select
+from textual.widgets import Button, Input, Label
 
 from lecture_util.configuration import (
     AppConfig,
@@ -17,16 +16,8 @@ from lecture_util.configuration import (
     video_root_is_in_vault,
 )
 from lecture_util.errors import LectureUtilError
-from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionTuning
+from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionSettings
 from lecture_util.vault import discover_courses, validate_semester_start
-
-
-DEVICE_OPTIONS = (
-    ("Auto", "auto"),
-    ("Apple MLX", "mlx"),
-    ("NVIDIA CUDA", "cuda"),
-    ("CPU", "cpu"),
-)
 
 
 class ConfirmVaultVideoScreen(ModalScreen[bool]):
@@ -112,18 +103,7 @@ class OnboardingApp(FormApp[AppConfig]):
         yield Input(value=str(self.initial.video_root), id="video-root")
         yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
         yield Input(value=self.initial.semester_start, id="semester-start")
-        yield Label("Transcription device", classes="field-label")
-        yield Select(
-            DEVICE_OPTIONS,
-            value=self.initial.device,
-            allow_blank=False,
-            id="device",
-        )
-        yield Label("Whisper model", classes="field-label")
-        yield Input(value=self.initial.whisper_model, id="whisper-model")
-        yield Label("Lecture language", classes="field-label")
-        yield Input(value=self.initial.language, id="language")
-        yield TranscriptionTuning(self.initial.compute_type, self.initial.batch_size, self.initial.beam_size)
+        yield TranscriptionSettings(self.initial, credentials=True)
         yield CodexModelPicker(self.initial.llm_model, self.initial.reasoning_effort)
 
     def on_mount(self) -> None:
@@ -140,12 +120,12 @@ class OnboardingApp(FormApp[AppConfig]):
         self._submit()
 
     def refresh_preview(self) -> None:
-        device = self.query_one("#device", Select).value
+        transcription = self.query_one(TranscriptionSettings).preview()
         self.query_one("#preview-content", Label).update(
             f"STORAGE\nVault\n{self.value('vault-root') or 'Choose a Vault'}"
             f"\n\nVideos\n{self.value('video-root') or 'Choose a folder'}"
             f"\n\nSEMESTER START\n{self.value('semester-start') or 'Choose a date'}"
-            f"\n\nTRANSCRIPTION\n{device} · {self.value('whisper-model') or 'Choose a model'}"
+            f"\n\nTRANSCRIPTION\n{transcription}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}"
             f"\n\nSUMMARY\n{self.selected_model() or 'Codex default'}"
             f"\nThinking effort: {self.selected_effort() or 'Codex default'}"
@@ -165,11 +145,19 @@ class OnboardingApp(FormApp[AppConfig]):
                 lambda confirmed: self._finish_submit(config, confirmed),
             )
             return
+        self._save_and_exit(config)
+
+    def _save_and_exit(self, config: AppConfig) -> None:
+        try:
+            self.query_one(TranscriptionSettings).save_credentials()
+        except LectureUtilError as error:
+            self.show_error(error)
+            return
         self.exit(config)
 
     def _finish_submit(self, config: AppConfig, confirmed: bool | None) -> None:
         if confirmed:
-            self.exit(replace(config, video_in_vault_allowed=True))
+            self._save_and_exit(replace(config, video_in_vault_allowed=True))
 
     def _build_config(self) -> AppConfig:
         self.error_field = "vault-root"
@@ -184,21 +172,13 @@ class OnboardingApp(FormApp[AppConfig]):
         if Path(video_value).expanduser().exists() and not Path(video_value).expanduser().is_dir():
             raise LectureUtilError("Video storage path is not a directory.")
         self.checked("semester-start", lambda: validate_semester_start(self.value("semester-start")))
-        for field, label in (("whisper-model", "Whisper model"), ("language", "lecture language")):
-            self.error_field = field
-            if not self.value(field):
-                raise LectureUtilError(f"Configured {label} must not be empty.")
-        self.error_field = "device"
-        device = cast(str, self.query_one("#device", Select).value)
+        transcription = self.query_one(TranscriptionSettings).values()
         return validate_app_config(
             AppConfig(
                 vault_root=Path(vault_value),
                 video_root=Path(video_value),
                 semester_start=self.query_one("#semester-start", Input).value,
-                **self.query_one(TranscriptionTuning).values(),
-                whisper_model=self.query_one("#whisper-model", Input).value,
-                language=self.query_one("#language", Input).value,
-                device=device,
+                **transcription,
                 llm_model=self.selected_model(),
                 reasoning_effort=self.validated_effort(),
             ),

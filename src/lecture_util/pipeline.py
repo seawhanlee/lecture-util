@@ -150,11 +150,13 @@ def transcription_stage(
     language: str = "auto",
     device: str = "auto",
     compute_type: str = "auto", batch_size: int = 0, beam_size: int | None = None,
+    transcription_provider: str = "local", openai_transcription_model: str = "gpt-4o-transcribe",
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> Transcript:
     from lecture_util.configuration import validate_transcription_options
-    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size)
+    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size,
+                                   transcription_provider, openai_transcription_model)
     validate_transcription_options(options)
     if not force and paths.transcript_json.is_file():
         from lecture_util.transcription import load_transcript
@@ -181,20 +183,24 @@ def transcription_stage(
         progress,
         "transcription",
         "start",
-        f"Transcribing with Whisper {model} on {device} (this may take several minutes)",
+        f"Transcribing with {options.selected_model} on {transcription_provider if transcription_provider == 'openai' else device} (this may take several minutes)",
     )
     state.start_stage(
         "transcription",
         input_sha256=source_digest,
-        options=options.to_dict(), backend_platform=backend_platform(),
-        requested_model=model,
+        options=options.to_dict(), backend_platform=("openai" if transcription_provider == "openai" else backend_platform()),
+        requested_model=options.selected_model,
         requested_language=language,
-        requested_device=device,
+        requested_device="openai" if transcription_provider == "openai" else device,
     )
     try:
-        transcript = transcribe_audio(paths.audio, model=model, language=language, device=device,
-                                      compute_type=compute_type, batch_size=batch_size,
-                                      beam_size=beam_size, progress=progress)
+        if transcription_provider == "openai":
+            from lecture_util.api_transcription import transcribe_openai
+            transcript = transcribe_openai(paths.audio, options, force=force, progress=progress)
+        else:
+            transcript = transcribe_audio(paths.audio, model=model, language=language, device=device,
+                                          compute_type=compute_type, batch_size=batch_size,
+                                          beam_size=beam_size, progress=progress)
         save_transcript(
             transcript,
             paths.transcript_json,
@@ -254,6 +260,7 @@ def prepare_lecture(
     language: str = "auto",
     device: str = "auto",
     compute_type: str = "auto", batch_size: int = 0, beam_size: int | None = None,
+    transcription_provider: str = "local", openai_transcription_model: str = "gpt-4o-transcribe",
     force: bool = False,
     progress: ProgressCallback | None = None,
 ) -> tuple[LecturePaths, RunState, Transcript]:
@@ -270,7 +277,8 @@ def prepare_lecture(
         published_transcript=published_transcript,
         tags=tags,
     )
-    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size)
+    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size,
+                                   transcription_provider, openai_transcription_model)
     preflight_preparation(paths, state, options, force=force)
     if source.kind == "hls":
         download_stage(paths, state, force=force, progress=progress)
@@ -282,6 +290,7 @@ def prepare_lecture(
         language=language,
         device=device,
         compute_type=compute_type, batch_size=batch_size, beam_size=beam_size,
+        transcription_provider=transcription_provider, openai_transcription_model=openai_transcription_model,
         force=force,
         progress=progress,
     )
@@ -305,6 +314,7 @@ def run_lecture(
     language: str = "auto",
     device: str = "auto",
     compute_type: str = "auto", batch_size: int = 0, beam_size: int | None = None,
+    transcription_provider: str = "local", openai_transcription_model: str = "gpt-4o-transcribe",
     prompt: str = DEFAULT_PROMPT,
     force: bool = False,
     progress: ProgressCallback | None = None,
@@ -313,7 +323,8 @@ def run_lecture(
     source = source or resolve_source(url)
     preview = LecturePaths(output_dir / f"lecture-{lecture_id(source.cache_key)}", video_path=video_path)
     preview_state = RunState(preview, read_only=True)
-    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size)
+    options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size,
+                                   transcription_provider, openai_transcription_model)
     prepared = cached_preparation(preview, preview_state, options, force=force)[2]
     if summarizer.name == "codex" and (not prepared or not summary_cached(preview, preview_state, summarizer, prompt)):
         require_executable("codex")
@@ -332,6 +343,7 @@ def run_lecture(
         language=language,
         device=device,
         compute_type=compute_type, batch_size=batch_size, beam_size=beam_size,
+        transcription_provider=transcription_provider, openai_transcription_model=openai_transcription_model,
         force=force,
         progress=progress,
     )
@@ -357,7 +369,7 @@ def transcription_cached(paths: LecturePaths, state: RunState, options: Transcri
     return bool(
         stage.get("status") == "complete"
         and stage.get("options") == options.to_dict()
-        and stage.get("backend_platform") == backend_platform()
+        and stage.get("backend_platform") == ("openai" if options.transcription_provider == "openai" else backend_platform())
         and paths.audio.is_file() and paths.transcript_json.is_file()
         and stage.get("input_sha256") == state.digest(paths.audio)
     )
@@ -499,6 +511,8 @@ def _execute_run_locked(
                 published_summary=published.summary,
                 published_transcript=published.transcript,
                 tags=options.tags,
+                transcription_provider=options.transcription_provider,
+                openai_transcription_model=options.openai_transcription_model,
                 model=options.whisper_model,
                 language=options.language,
                 device=options.device,

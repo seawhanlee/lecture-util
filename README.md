@@ -1,10 +1,11 @@
 # lecture-util
 
-공개 `.m3u8` 강의를 다운로드하거나 로컬 영상·녹음 파일을 불러와 로컬 Whisper로 전사한 뒤, 전사문과 학습 노트를 개인 Obsidian Vault에 발행하는 도구입니다.
+공개 `.m3u8` 강의를 다운로드하거나 로컬 영상·녹음 파일을 불러와 로컬 Whisper 또는 OpenAI API로 전사한 뒤, 전사문과 학습 노트를 개인 Obsidian Vault에 발행하는 도구입니다.
 
 - `yt-dlp`로 HLS 영상을 MP4로 다운로드
 - `ffmpeg`로 16 kHz mono WAV 추출
-- Apple Silicon에서는 `mlx-whisper`, NVIDIA Linux에서는 `faster-whisper` 사용
+- OpenAI API 전사: GPT 전사 모델 또는 자막용 `whisper-1` 선택
+- 로컬 전사: Apple Silicon에서는 `mlx-whisper`, NVIDIA Linux에서는 `faster-whisper` 사용
 - 로그인된 Codex CLI로 전사문 요약
 - 과목별 `Lecture` 또는 `Lectures` 폴더에 Obsidian Markdown 발행
 - 원본 영상은 설정한 영상 보관소에, 중간 산출물은 Vault 밖의 사용자 캐시에 보관
@@ -75,7 +76,9 @@ Linux x86_64에서는 `faster-whisper`와 CUDA 12, cuDNN 9 런타임 패키지�
 uv run lecture-util doctor
 ```
 
-자동 장치 선택은 Apple Silicon의 MLX 또는 Linux x86_64의 NVIDIA GPU를 기대합니다. GPU를 사용할 수 없는 환경에서 CPU 전사를 의도한다면 `--device cpu`를 명시하거나 TUI의 장치를 `CPU`로 선택하세요.
+로컬 전사의 자동 장치 선택은 Apple Silicon의 MLX 또는 Linux x86_64의 NVIDIA GPU를 기대합니다. GPU를 사용할 수 없는 환경에서 CPU 전사를 의도한다면 `--device cpu`를 명시하거나 TUI의 장치를 `CPU`로 선택하세요.
+
+OpenAI API 전사는 GPU나 로컬 Whisper 모델을 실행하지 않습니다. `uv sync`는 기존 플랫폼별 로컬 전사 의존성도 설치합니다. API 키를 설정 화면에 저장하려면 macOS Keychain 또는 Linux의 실행 중인 Secret Service가 필요합니다. 보안 저장소가 없는 서버에서는 `OPENAI_API_KEY` 환경변수를 사용할 수 있습니다. `doctor`는 저장된 플랫폼에 맞춰 SDK·키 또는 로컬 전사 환경을 점검하며, 실제 API 요청은 보내지 않습니다.
 
 ## 온보딩과 Vault 준비
 
@@ -86,6 +89,9 @@ uv run lecture-util doctor
 | Obsidian Vault path | `~/Documents/학부연구생` | 강의 노트를 발행할 Vault 루트 |
 | Video storage path | `~/Videos/lecture-util` | 과목과 주차별 MP4 영상을 보관할 루트 |
 | Semester start date | 가장 최근의 8월 31일 | 강의 주차 계산 기준일 |
+| Transcription platform | `local` | 로컬 Whisper 또는 `openai` API 전사 |
+| OpenAI transcription model | `gpt-4o-transcribe` | OpenAI 선택 시 사용할 전사 모델 |
+| OpenAI API key | 빈 값 | 설정 화면에서 입력하여 OS 보안 저장소에 보관 |
 | Transcription device | `auto` | `auto`, `mlx`, `cuda`, `cpu` 중 선택 |
 | Whisper model | `large-v3` | 기본 Whisper 모델 이름 또는 경로 |
 | Lecture language | `auto` | 자동 감지 또는 `ko`, `en` 같은 언어 코드 |
@@ -203,7 +209,7 @@ https://example.com/lecture/index.m3u8
 ✓ [1/4] Downloaded 96.8 MiB in 23.4s
 → [2/4] Extracting 16 kHz mono audio
 ✓ [2/4] Extracted 61.4 MiB in 0.9s
-→ [3/4] Transcribing with Whisper large-v3 on cuda (this may take several minutes)
+→ [3/4] Transcribing with large-v3 on cuda (this may take several minutes)
 ✓ [3/4] Created 282 segments in 2m 12s (faster-whisper/large-v3, ko)
 → [4/4] Summarizing transcript file with Codex
 ✓ [4/4] Wrote summary in 1m 58s to /home/seawhan/.cache/lecture-util/lecture-0123456789/summary.md
@@ -238,6 +244,35 @@ uv run lecture-util run URL \
 
 ### 전사 옵션 지정
 
+플랫폼은 첫 온보딩과 `config`에서 `Local Whisper` 또는 `OpenAI API`로 선택합니다. 기존 설정에 플랫폼 항목이 없으면 로컬 전사를 유지합니다. 강의 폼에서도 해당 실행의 플랫폼·API 모델을 변경할 수 있습니다. 로컬의 모델·장치·튜닝 설정은 API 설정과 별도로 보존됩니다.
+
+#### OpenAI API 전사
+
+1. `uv run lecture-util config`에서 `OpenAI API`와 모델을 선택합니다.
+2. API 키를 마스킹 입력창에 입력하고 저장합니다. 키는 macOS Keychain 또는 Linux Secret Service에 보관되며 설정 JSON·실행 요청·로그에는 포함되지 않습니다.
+3. 다음 실행부터 저장된 플랫폼·모델을 사용합니다. 강의 오디오가 OpenAI로 전송되며 API 이용료는 별도 과금됩니다.
+
+기존 키는 화면에 재표시하지 않습니다. 빈 입력은 저장된 키를 유지하고, 새 값을 입력하면 교체합니다. 삭제 체크박스는 저장할 때만 적용되며 취소하면 키를 변경하지 않습니다. 보안 저장소 오류가 나면 입력을 유지한 채 오류를 표시하고 평문 파일로 대체 저장하지 않습니다. 환경변수 `OPENAI_API_KEY`가 있으면 저장된 키보다 우선하며, 저장된 키를 삭제해도 환경변수는 유지됩니다.
+
+| 모델 | 출력 |
+| --- | --- |
+| `gpt-4o-transcribe` (API 기본값) | 시간표시 없는 전사 본문·학습 노트, SRT 생략 |
+| `gpt-4o-mini-transcribe` | 시간표시 없는 전사 본문·학습 노트, SRT 생략 |
+| `whisper-1` | 구간별 시간표시가 있는 전사 본문·SRT, 학습 노트 |
+
+```bash
+uv run lecture-util run './lecture.m4a' \
+  --course '공기역학특론' --date 2026-09-14 --title '압축성 유동' \
+  --transcription-provider openai \
+  --openai-transcription-model gpt-4o-transcribe --language ko
+```
+
+`--transcription-provider`와 `--openai-transcription-model`은 `run`과 단독 `transcribe`에서 모두 지원하며, 명시하면 해당 실행의 저장값만 덮어씁니다. API 모드에서 `--whisper-model`, `--device`, `--compute-type`, `--batch-size`, `--beam-size`를 명시하면 오류로 안내합니다. 로컬 모드에서 API 모델을 명시하는 것도 오류입니다. API 사용 중에도 요약은 기존 Codex CLI를 사용합니다.
+
+추출된 16 kHz mono WAV는 최대 3분씩 순서대로 전송합니다. 분할 경계 직전 10초 안에 무음이 있으면 그 지점을 사용하며 각 파일의 25MB 제한을 검사합니다. API 응답에 감지 언어가 없으면 `auto` 실행의 결과 언어는 `unknown`으로 기록합니다. 다른 모델이나 로컬 추론으로 자동 전환하지 않습니다.
+
+#### 로컬 Whisper 전사
+
 Whisper 모델, 언어, 장치와 Codex 모델도 온보딩 설정을 기본값으로 사용합니다. 명령행 옵션을 지정하면 해당 실행에서만 저장값을 덮어쓰며 설정 파일은 변경하지 않습니다.
 
 ```bash
@@ -245,6 +280,7 @@ uv run lecture-util run URL \
   --course '공기역학특론' \
   --date 2026-09-04 \
   --title '압축성 유동' \
+  --transcription-provider local \
   --device cuda \
   --whisper-model large-v3 \
   --language ko
@@ -387,7 +423,7 @@ Codex가 생성한 요약...
 
 ### Vault의 전사 노트
 
-같은 주차 폴더에 `YYYY-MM-DD 제목 전사.md`를 만듭니다. `lecture-transcript` frontmatter와 본문의 원본 URL, 요약 노트 링크 및 구간별 타임스탬프가 포함됩니다. 생성되는 두 노트의 Properties에는 `source_url`과 `transcript`를 추가하지 않습니다.
+같은 주차 폴더에 `YYYY-MM-DD 제목 전사.md`를 만듭니다. `lecture-transcript` frontmatter와 본문의 원본 URL, 요약 노트 링크가 포함됩니다. 로컬 Whisper와 `whisper-1` 결과에는 구간별 타임스탬프도 포함되며 GPT API 모델 결과에는 본문만 표시합니다. 생성되는 두 노트의 Properties에는 `source_url`과 `transcript`를 추가하지 않습니다.
 
 ```markdown
 # 2026-09-04 압축성 유동 전사
@@ -426,14 +462,15 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
 ├── audio.wav
 ├── transcript.json
 ├── transcript.md
-├── transcript.srt
+├── transcript.srt        # 시간 정보가 있는 모델만 생성
+├── openai-chunks/        # OpenAI 조각별 응답과 재개 지문
 ├── summary.md
 ├── run.json
 ├── request.json
 └── publication.json
 ```
 
-`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그, 입력·출력 지문과 각 단계의 상태가 기록됩니다. `request.json`은 재개에 필요한 입력과 프롬프트 본문을 보관하고, `publication.json`은 게시할 두 노트의 내용·지문·상태를 보관합니다. 이 파일들은 캐시에만 저장되며 저장소에 커밋하지 않습니다. 캐시와 영상은 자동 삭제하지 않습니다.
+`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그, 입력·출력 지문과 각 단계의 상태가 기록됩니다. `request.json`은 재개에 필요한 입력과 프롬프트 본문을 보관하고, `publication.json`은 게시할 두 노트의 내용·지문·상태를 보관합니다. `openai-chunks/`도 전사 본문을 포함하는 비공개 중간 산출물입니다. 이 파일들은 캐시에만 저장되며 저장소에 커밋하지 않습니다. 캐시와 영상은 자동 삭제하지 않습니다.
 
 ### 기존 설정과 영상 옮기기
 
@@ -448,12 +485,14 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
 
 같은 URL을 다시 처리하면 URL 해시가 같으므로 기존 작업공간을 사용합니다.
 
-- 완료 상태뿐 아니라 입력·출력 파일 지문과 전사 옵션을 비교합니다. 모델·언어·장치·정밀도·배치·beam 또는 실행 플랫폼이 바뀌면 전사를 다시 수행합니다.
+- 완료 상태뿐 아니라 입력·출력 파일 지문과 전사 옵션을 비교합니다. 로컬 전사는 모델·언어·장치·정밀도·배치·beam 또는 실행 플랫폼이 바뀌면 다시 수행합니다. OpenAI 전사는 오디오·플랫폼·API 모델·언어·분할 버전으로 캐시를 구분하며 OS·로컬 튜닝·API 키 변경은 캐시를 무효화하지 않습니다.
 - 상위 단계를 시작할 때 하위 완료 상태를 무효화합니다. 따라서 `download --force` 이후 일반 `transcribe`도 새 오디오를 처리합니다.
-- 유효한 JSON 전사가 있고 Markdown/SRT만 없으면 누락된 파일을 복원합니다. 기존 Markdown 편집 내용은 보존되며, 요약 캐시는 편집된 내용을 기준으로 판단합니다.
+- 유효한 JSON 전사가 있고 Markdown/SRT만 없으면 모델이 지원하는 누락 파일을 복원합니다. GPT API 결과는 SRT가 없어도 완료된 전사이며, 이 모델로 재전사하면 이전 SRT는 제거합니다. 기존 Markdown 편집 내용은 보존되며, 요약 캐시는 편집된 내용을 기준으로 판단합니다.
 - 손상된 상태와 전사 JSON은 오류로 보고합니다. `run.json`은 정상 백업에서 복구하고, 전사는 `transcribe --force`로 재생성할 수 있습니다.
 - 같은 URL의 동시 실행은 작업공간 잠금으로 차단합니다. 게시에는 기존 파일을 교체하지 않는 배타적 생성과 강의 폴더 잠금을 사용합니다.
 - 노트 한 개만 게시된 뒤 실패하면, 게시 기록과 기존 파일의 내용이 일치하는 경우에만 나머지를 복구합니다. 사용자가 수정했거나 이미 게시가 완료된 노트는 덮어쓰지 않습니다.
+
+OpenAI 조각별 응답은 완료할 때마다 저장합니다. 중간에 실패하거나 취소하면 `resume` 또는 같은 단독 `transcribe` 명령으로 완료한 조각을 재사용합니다. `--force`는 현재 전사 조건의 조각 캐시도 초기화합니다. 손상된 조각 캐시는 `transcribe --force`로 다시 생성하세요. 연결·시간초과·일시적인 서버 오류는 최초 요청 후 최대 두 번 재시도하며 인증·할당량 오류는 안내 후 중단합니다. 재개 시 플랫폼·모델은 기록된 요청을 따르고 키는 현재 환경변수 또는 보안 저장소에서 읽습니다. 완료된 전사 캐시 재사용과 video-only 다운로드에는 키가 필요하지 않습니다.
 
 캐시를 재사용한 단계는 진행 화면에서 `↻`로 표시됩니다.
 
@@ -483,7 +522,7 @@ uv run lecture-util resume "$HOME/.cache/lecture-util/lecture-0123456789"
 TUI 실행 실패 후에는 `retry`, `edit`, `quit`을 선택합니다. `edit`은 입력과 프롬프트를 복원한 폼을 엽니다.
 `Ctrl+C`는 재시도 없이 중단하며 종료 코드는 130입니다. TUI 제출 시 모델을 다운로드하지 않는 사전 검사를 비동기로 수행하고, 오류가 있으면 입력을 보존합니다.
 
-전사 진행 화면에는 모델 준비와 추론 상태를 표시합니다. faster-whisper는 처리 위치 기반의 추정 진행률과 오디오 시간/실행 시간 배속을 보여줍니다. 무음을 건너뛸 수 있으므로 정확한 남은 시간 예측은 아닙니다. MLX는 공개 API가 제공하지 않는 구간별 진행률을 표시하지 않습니다.
+전사 진행 화면에는 모델 준비와 추론 상태를 표시합니다. faster-whisper는 처리 위치 기반의 추정 진행률과 오디오 시간/실행 시간 배속을 보여줍니다. 무음을 건너뛸 수 있으므로 정확한 남은 시간 예측은 아닙니다. MLX는 공개 API가 제공하지 않는 구간별 진행률을 표시하지 않습니다. OpenAI는 현재 전송 조각과 완료한 오디오 구간의 진행률을 표시합니다.
 
 ## 단계별 명령
 
@@ -522,7 +561,12 @@ uv run lecture-util transcribe LECTURE_DIR \
   --device cuda
 ```
 
-`LECTURE_DIR/audio.wav`를 읽어 `transcript.json`, `transcript.md`, `transcript.srt`를 만듭니다.
+`LECTURE_DIR/audio.wav`를 읽어 `transcript.json`, `transcript.md`를 만듭니다. 로컬 Whisper와 OpenAI `whisper-1`은 `transcript.srt`도 생성합니다. 저장된 API 설정을 사용하거나 다음처럼 직접 선택할 수 있습니다.
+
+```bash
+uv run lecture-util transcribe LECTURE_DIR \
+  --transcription-provider openai --openai-transcription-model whisper-1
+```
 
 ### 기존 전사문 요약
 

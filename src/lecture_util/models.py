@@ -7,15 +7,15 @@ from typing import Any, Literal
 
 @dataclass(slots=True)
 class Segment:
-    start: float
-    end: float
+    start: float | None
+    end: float | None
     text: str
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Segment:
         return cls(
-            start=float(data["start"]),
-            end=float(data["end"]),
+            start=float(data["start"]) if data["start"] is not None else None,
+            end=float(data["end"]) if data["end"] is not None else None,
             text=str(data["text"]).strip(),
         )
 
@@ -31,6 +31,12 @@ class Transcript:
     fallback_reason: str | None = None
     requested_options: dict[str, Any] = field(default_factory=dict)
     effective_options: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_timestamps(self) -> bool:
+        return self.effective_options.get("timestamps", True) and all(
+            segment.start is not None and segment.end is not None for segment in self.segments
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -92,6 +98,8 @@ class RunOptions:
     beam_size: int | None = None
     source: LectureSource | None = None
     video_only: bool = False
+    transcription_provider: str = "local"
+    openai_transcription_model: str = "gpt-4o-transcribe"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,5 +124,18 @@ class TranscriptionOptions:
     batch_size: int = 0
     beam_size: int | None = None
 
+    transcription_provider: str = "local"
+    openai_transcription_model: str = "gpt-4o-transcribe"
+
+    @property
+    def selected_model(self) -> str:
+        return self.openai_transcription_model if self.transcription_provider == "openai" else self.model
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        if self.transcription_provider == "openai":
+            return {"provider": "openai", "model": self.openai_transcription_model,
+                    "language": self.language, "chunk_version": 1}
+        data = asdict(self)
+        data.pop("transcription_provider")
+        data.pop("openai_transcription_model")
+        return data

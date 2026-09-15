@@ -21,6 +21,8 @@ from lecture_util.vault import (
 
 
 CONFIG_VERSION = 2
+TRANSCRIPTION_PROVIDERS = ("local", "openai")
+OPENAI_TRANSCRIPTION_MODELS = ("gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1")
 SUPPORTED_DEVICES = ("auto", "mlx", "cuda", "cpu")
 
 
@@ -38,6 +40,8 @@ class AppConfig:
     compute_type: str = "auto"
     batch_size: int = 0
     beam_size: int | None = None
+    transcription_provider: str = "local"
+    openai_transcription_model: str = "gpt-4o-transcribe"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -95,6 +99,8 @@ def validate_app_config(
         video_root = video_root.resolve()
 
     semester_start = validate_semester_start(config.semester_start)
+    if config.openai_transcription_model not in OPENAI_TRANSCRIPTION_MODELS:
+        raise TranscriptionOptionError("Choose a supported OpenAI transcription model.", "openai-transcription-model")
     whisper_model = config.whisper_model.strip()
     if not whisper_model:
         raise LectureUtilError("Configured Whisper model must not be empty.")
@@ -109,6 +115,7 @@ def validate_app_config(
     validate_transcription_options(TranscriptionOptions(
         whisper_model, language, config.device, config.compute_type,
         config.batch_size, config.beam_size,
+        config.transcription_provider, config.openai_transcription_model,
     ))
     llm_model = config.llm_model.strip() if config.llm_model else None
 
@@ -137,6 +144,8 @@ def validate_app_config(
         vault_root=vault_root,
         video_root=video_root,
         semester_start=semester_start,
+        transcription_provider=config.transcription_provider,
+        openai_transcription_model=config.openai_transcription_model,
         whisper_model=whisper_model,
         compute_type=config.compute_type, batch_size=config.batch_size, beam_size=config.beam_size,
         language=language,
@@ -174,7 +183,8 @@ def app_config_from_dict(
         )
     if video_only:
         data = {**data, "whisper_model": "large-v3", "language": "auto",
-                "device": "auto", "llm_model": None, "reasoning_effort": None}
+                "device": "auto", "llm_model": None, "reasoning_effort": None,
+                "transcription_provider": "local", "openai_transcription_model": "gpt-4o-transcribe"}
     vault_root = _required_string(data, "vault_root", "Vault path")
     video_root = _required_string(data, "video_root", "video storage path")
     semester_start = _required_string(data, "semester_start", "semester start date")
@@ -194,6 +204,8 @@ def app_config_from_dict(
             vault_root=Path(vault_root),
             video_root=Path(video_root),
             semester_start=semester_start,
+            transcription_provider=data.get("transcription_provider", "local"),
+            openai_transcription_model=data.get("openai_transcription_model", "gpt-4o-transcribe"),
             whisper_model=whisper_model,
             compute_type=data.get("compute_type", "auto"),
             batch_size=data.get("batch_size", 0),
@@ -359,6 +371,14 @@ COMPUTE_TYPES = ("auto", "float16", "float32", "int8", "int8_float16")
 
 
 def validate_transcription_options(options: TranscriptionOptions) -> None:
+    if options.transcription_provider not in TRANSCRIPTION_PROVIDERS:
+        raise TranscriptionOptionError("Choose local or openai transcription.", "transcription-provider")
+    if options.transcription_provider == "openai":
+        if options.openai_transcription_model not in OPENAI_TRANSCRIPTION_MODELS:
+            raise TranscriptionOptionError("Choose a supported OpenAI transcription model.", "openai-transcription-model")
+        if not isinstance(options.language, str) or options.language not in LANGUAGE_CODES:
+            raise TranscriptionOptionError("Unsupported lecture language; use auto or ko/en.", "language")
+        return
     if not isinstance(options.model, str) or not options.model.strip():
         raise TranscriptionOptionError("Enter a Whisper model.", "whisper-model")
     if not isinstance(options.language, str) or options.language not in LANGUAGE_CODES:
@@ -389,3 +409,13 @@ def resolve_beam_size(value: str | None, default: int | None) -> int | None:
         return result
     except ValueError as error:
         raise TranscriptionOptionError("Beam size must be a positive integer or default.", "beam-size") from error
+
+
+def validate_provider_overrides(provider: str, *local_options: object,
+                                openai_transcription_model: str | None = None) -> None:
+    if provider not in TRANSCRIPTION_PROVIDERS:
+        raise LectureUtilError("Transcription provider must be local or openai.")
+    if provider == "openai" and any(value is not None for value in local_options):
+        raise LectureUtilError("--whisper-model, --device, --compute-type, --batch-size and --beam-size apply only to local transcription.")
+    if provider == "local" and openai_transcription_model is not None:
+        raise LectureUtilError("--openai-transcription-model requires the openai transcription provider.")

@@ -202,6 +202,10 @@ def effective_compute_type(device: str, requested: str) -> str:
 def preflight_transcription(options: TranscriptionOptions) -> str:
     from lecture_util.configuration import validate_transcription_options
     validate_transcription_options(options)
+    if options.transcription_provider == "openai":
+        from lecture_util.api_transcription import preflight_openai
+        preflight_openai()
+        return "openai"
     device = detect_device(options.device)
     validate_transcription_options(replace(options, device=device))
     if device == "mlx":
@@ -336,14 +340,17 @@ def format_timestamp(seconds: float, *, srt: bool = False) -> str:
 def transcript_markdown(transcript: Transcript) -> str:
     lines = ["# Transcript", ""]
     for segment in transcript.segments:
-        lines.append(
-            f"[{format_timestamp(segment.start)}–{format_timestamp(segment.end)}] {segment.text}"
-        )
+        if segment.start is None or segment.end is None:
+            lines.append(segment.text)
+        else:
+            lines.append(f"[{format_timestamp(segment.start)}–{format_timestamp(segment.end)}] {segment.text}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
 def transcript_srt(transcript: Transcript) -> str:
+    if not transcript.has_timestamps:
+        raise LectureUtilError("This transcription model does not provide timestamps or SRT subtitles.")
     blocks = []
     for index, segment in enumerate(transcript.segments, 1):
         blocks.append(
@@ -362,7 +369,10 @@ def transcript_srt(transcript: Transcript) -> str:
 def save_transcript(transcript: Transcript, json_path: Path, markdown_path: Path, srt_path: Path) -> None:
     atomic_write_json(json_path, transcript.to_dict())
     atomic_write_text(markdown_path, transcript_markdown(transcript))
-    atomic_write_text(srt_path, transcript_srt(transcript))
+    if transcript.has_timestamps:
+        atomic_write_text(srt_path, transcript_srt(transcript))
+    else:
+        srt_path.unlink(missing_ok=True)
 
 
 def load_transcript(path: Path) -> Transcript:
@@ -373,8 +383,13 @@ def load_transcript(path: Path) -> Transcript:
         transcript = Transcript.from_dict(data)
         if not math.isfinite(transcript.duration) or transcript.duration < 0:
             raise ValueError("invalid transcript duration")
-        if any(not math.isfinite(segment.start) or not math.isfinite(segment.end)
-               or not 0 <= segment.start <= segment.end for segment in transcript.segments):
+        if any(
+            (segment.start is None) != (segment.end is None)
+            or (segment.start is not None and segment.end is not None and (
+                not math.isfinite(segment.start) or not math.isfinite(segment.end)
+                or not 0 <= segment.start <= segment.end))
+            for segment in transcript.segments
+        ):
             raise ValueError("invalid segment timestamps")
         return transcript
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
@@ -382,6 +397,11 @@ def load_transcript(path: Path) -> Transcript:
 
 
 def restore_transcript_files(transcript: Transcript, markdown: Path, srt: Path) -> None:
-    for path, render in ((markdown, transcript_markdown), (srt, transcript_srt)):
+    if not transcript.has_timestamps:
+        srt.unlink(missing_ok=True)
+    outputs = [(markdown, transcript_markdown)]
+    if transcript.has_timestamps:
+        outputs.append((srt, transcript_srt))
+    for path, render in outputs:
         if not path.exists():
             atomic_write_text(path, render(transcript))

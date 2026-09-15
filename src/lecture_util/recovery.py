@@ -16,7 +16,8 @@ from lecture_util.state import atomic_write_json, lecture_id
 
 def transcription_options(options: RunOptions) -> TranscriptionOptions:
     return TranscriptionOptions(options.whisper_model, options.language, options.device,
-                                options.compute_type, options.batch_size, options.beam_size)
+                                options.compute_type, options.batch_size, options.beam_size,
+                                options.transcription_provider, options.openai_transcription_model)
 
 
 def save_request(root: Path, options: RunOptions, vault: Path, videos: Path) -> None:

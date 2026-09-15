@@ -26,9 +26,8 @@ from lecture_util.configuration import (
 )
 from lecture_util.errors import LectureUtilError
 from lecture_util.pipeline import preflight_run
-from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionTuning
-from lecture_util.models import RunOptions, TranscriptionOptions
-from lecture_util.configuration import validate_transcription_options
+from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionSettings
+from lecture_util.models import RunOptions
 from lecture_util.state import lecture_id
 from lecture_util.vault import default_cache_root
 from lecture_util.media import resolve_source
@@ -117,23 +116,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             yield Input(placeholder="operating-systems, midterm", id="tags")
             yield Checkbox("Force every stage to run again", id="force")
         with Collapsible(title="Transcription", collapsed=True):
-            yield Label("Transcription device", classes="field-label")
-            yield Select(
-                (
-                    ("Auto", "auto"),
-                    ("Apple MLX", "mlx"),
-                    ("NVIDIA CUDA", "cuda"),
-                    ("CPU", "cpu"),
-                ),
-                value=self.config.device,
-                allow_blank=False,
-                id="device",
-            )
-            yield Label("Whisper model", classes="field-label")
-            yield Input(value=self.config.whisper_model, id="whisper-model")
-            yield Label("Lecture language", classes="field-label")
-            yield Input(value=self.config.language, id="language")
-            yield TranscriptionTuning(self.config.compute_type, self.config.batch_size, self.config.beam_size)
+            yield TranscriptionSettings(self.initial or self.config)
         with Collapsible(title="Summary", collapsed=True):
             yield CodexModelPicker(
                 self.initial.llm_model if self.initial else self.config.llm_model,
@@ -227,11 +210,11 @@ class LectureSetupApp(FormApp[RunOptions]):
             "Re-run every stage" if self.query_one("#force", Checkbox).value
             else "Reuse cached stages"
         )
-        whisper_model = self.value("whisper-model") or "Choose a model"
+        transcription = self.query_one(TranscriptionSettings).preview()
         self.query_one("#preview-content", Label).update(
             f"{course}\n{lecture_date}\n{title}\n\n"
             f"NOTE DESTINATION\n{destination}\n\n"
-            f"TRANSCRIPTION\n{self._select_value('#device')} · {whisper_model}"
+            f"TRANSCRIPTION\n{transcription}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}\n\n"
             f"SUMMARY\n{self.selected_model() or 'Codex default'}"
             f"\nThinking effort: {self.selected_effort() or 'Codex default'}"
@@ -259,7 +242,7 @@ class LectureSetupApp(FormApp[RunOptions]):
                 executor, preflight_run, options, self.vault_root, self.config.video_root,
             )
         except Exception as error:
-            self.error_field = "device"
+            self.error_field = ("transcription-provider" if options.transcription_provider == "openai" else "device")
             self.show_error(error if isinstance(error, LectureUtilError) else LectureUtilError(str(error)))
         else:
             self.call_later(self.exit, options)
@@ -277,6 +260,8 @@ class LectureSetupApp(FormApp[RunOptions]):
             "beam-size": str(options.beam_size) if options.beam_size is not None else "",
         }.items():
             self.query_one(f"#{field}", Input).value = value or ""
+        self.query_one("#transcription-provider", Select).value = options.transcription_provider
+        self.query_one("#openai-transcription-model", Select).value = options.openai_transcription_model
         self.query_one("#course", Select).value = options.course
         self.query_one("#device", Select).value = options.device
         self.query_one("#compute-type", Select).value = options.compute_type
@@ -341,20 +326,7 @@ class LectureSetupApp(FormApp[RunOptions]):
         else:
             prompt = resolve_prompt(None, None)
 
-        self.error_field = "whisper-model"
-        whisper_model = self.query_one("#whisper-model", Input).value.strip()
-        if not whisper_model:
-            raise LectureUtilError("Enter a Whisper model.")
-        self.error_field = "language"
-        language = self.query_one("#language", Input).value.strip()
-        if not language:
-            raise LectureUtilError("Enter a lecture language.")
-
-        tuning = self.query_one(TranscriptionTuning).values()
-        self.error_field = "language"
-        validate_transcription_options(TranscriptionOptions(
-            whisper_model, language, self._select_value("#device"), **tuning,
-        ))
+        transcription = self.query_one(TranscriptionSettings).values()
         raw_tags = self.query_one("#tags", Input).value.strip()
         llm_model = self.selected_model()
         return RunOptions(
@@ -367,10 +339,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             llm_model=llm_model,
             reasoning_effort=self.validated_effort(),
             tags=normalize_tags([raw_tags] if raw_tags else None),
-            **tuning,
-            whisper_model=whisper_model,
-            language=language,
-            device=self._select_value("#device"),
+            **transcription,
             prompt=prompt,
             force=self.query_one("#force", Checkbox).value,
         )

@@ -15,6 +15,7 @@ from rich.text import Text
 from rich.prompt import Prompt
 
 from lecture_util.configuration import (
+    validate_provider_overrides,
     default_app_config,
     default_config_path,
     load_config,
@@ -246,6 +247,8 @@ def run_command(
         "--whisper-model",
         help="Override the configured Whisper model",
     ),
+    transcription_provider: str | None = typer.Option(None, "--transcription-provider", help="local or openai"),
+    openai_transcription_model: str | None = typer.Option(None, "--openai-transcription-model", help="OpenAI transcription model"),
     language: str | None = typer.Option(
         None,
         "--language",
@@ -270,6 +273,10 @@ def run_command(
         config = (load_config(required=True, video_only=True)
                   if video_only else load_config(required=True))
         assert config is not None
+        provider = transcription_provider if transcription_provider is not None else config.transcription_provider
+        if not video_only:
+            validate_provider_overrides(provider, whisper_model, device, compute_type, batch_size, beam_size,
+                                        openai_transcription_model=openai_transcription_model)
         if video_only:
             validate_hls_url(url)
         source = resolve_source(url)
@@ -293,6 +300,8 @@ def run_command(
                 reasoning_effort=(config.reasoning_effort if reasoning_effort is None
                                   else reasoning_effort.strip() or None),
                 tags=normalize_tags(tag),
+                transcription_provider=provider,
+                openai_transcription_model=(config.openai_transcription_model if openai_transcription_model is None else openai_transcription_model),
                 whisper_model=config.whisper_model if whisper_model is None else whisper_model,
                 compute_type=config.compute_type if compute_type is None else compute_type,
                 batch_size=config.batch_size if batch_size is None else batch_size,
@@ -386,6 +395,8 @@ def download_command(
 def transcribe_command(
     lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False),
     model: str | None = typer.Option(None, "--whisper-model"),
+    transcription_provider: str | None = typer.Option(None, "--transcription-provider", help="local or openai"),
+    openai_transcription_model: str | None = typer.Option(None, "--openai-transcription-model", help="OpenAI transcription model"),
     language: str | None = typer.Option(None, "--language"),
     device: str | None = typer.Option(None, "--device"),
     compute_type: str | None = typer.Option(None, "--compute-type", help="auto/float16/float32/int8/int8_float16"),
@@ -397,6 +408,9 @@ def transcribe_command(
 
     def action() -> None:
         config = load_config(validate_vault=False) or default_app_config()
+        provider = transcription_provider if transcription_provider is not None else config.transcription_provider
+        validate_provider_overrides(provider, model, device, compute_type, batch_size, beam_size,
+                                    openai_transcription_model=openai_transcription_model)
         paths = LecturePaths(lecture_dir)
         with workspace_lock(lecture_dir):
             state = RunState(paths)
@@ -404,6 +418,8 @@ def transcribe_command(
                 transcript = transcription_stage(
                     paths,
                     state,
+                    transcription_provider=provider,
+                    openai_transcription_model=(config.openai_transcription_model if openai_transcription_model is None else openai_transcription_model),
                     model=model if model is not None else config.whisper_model,
                     language=language if language is not None else config.language,
                     device=device if device is not None else config.device,
