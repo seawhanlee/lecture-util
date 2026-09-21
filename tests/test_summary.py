@@ -191,6 +191,18 @@ class SummaryTests(unittest.TestCase):
                 )
             self.assertNotEqual(original, revised)
 
+    def test_summary_cached_returns_false_on_corrupt_transcript(self) -> None:
+        from lecture_util.pipeline import summary_cached
+        with tempfile.TemporaryDirectory() as directory:
+            paths, state = create_workspace(
+                "https://example.com/index.m3u8", Path(directory),
+            )
+            state.complete_stage("summary", status="complete", fingerprint="fp", sha256="hash")
+            paths.transcript_json.write_text("{corrupt json")
+            paths.transcript_markdown.write_text("# Transcript")
+            paths.summary.write_text("# Summary")
+            self.assertFalse(summary_cached(paths, state, FakeSummarizer(), DEFAULT_PROMPT))
+
 
 if __name__ == "__main__":
     unittest.main()

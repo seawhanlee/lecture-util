@@ -35,7 +35,13 @@ from lecture_util.models import LecturePaths, RunOptions
 from lecture_util.onboarding import run_onboarding
 from lecture_util.pipeline import audio_stage, download_stage, transcription_stage
 from lecture_util.recovery import load_request
-from lecture_util.state import RunState, create_workspace, lecture_id, workspace_lock
+from lecture_util.state import (
+    RunState,
+    clear_workspace,
+    create_workspace,
+    lecture_id,
+    workspace_lock,
+)
 from lecture_util.summarizers import CodexSummarizer
 from lecture_util.summary import summary_stage
 from lecture_util.transcription import load_transcript, restore_transcript_files
@@ -140,6 +146,22 @@ def _execute_run(
                 cache_root=cache_root, console=console)
 
 
+class ActionPrompt(Prompt):
+    ALIASES = {
+        "c": "clear-cache",
+        "clean": "clear-cache",
+        "clear": "clear-cache",
+        "r": "retry",
+        "e": "edit",
+        "q": "quit",
+    }
+
+    def process_response(self, value: str) -> str:
+        value = value.strip().lower()
+        value = self.ALIASES.get(value, value)
+        return super().process_response(value)
+
+
 def _interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -178,13 +200,24 @@ def root_callback(ctx: typer.Context) -> None:
                 raise typer.Exit(130)
             except Exception as error:
                 console.print(Text(str(error), style="red"))
-                choice = Prompt.ask("Next action", choices=["retry", "edit", "quit"],
-                                    default="quit", console=console)
+                choice = ActionPrompt.ask(
+                    "Next action",
+                    choices=["retry", "clear-cache", "edit", "quit"],
+                    default="quit",
+                    console=console,
+                )
                 if choice == "quit":
                     raise typer.Exit(1)
-                options = replace(options, force=False)
-                if choice == "edit":
-                    options = run_tui(config, initial=options)
+                if choice == "clear-cache":
+                    source = options.source or resolve_source(options.url)
+                    cache_dir = default_cache_root().resolve() / f"lecture-{lecture_id(source.cache_key)}"
+                    clear_workspace(cache_dir)
+                    console.print(f"[yellow]Cleared cache:[/yellow] {cache_dir}")
+                    options = replace(options, force=True)
+                else:
+                    options = replace(options, force=False)
+                    if choice == "edit":
+                        options = run_tui(config, initial=options)
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error

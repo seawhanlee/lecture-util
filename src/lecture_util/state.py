@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -242,3 +243,17 @@ def directory_lock(path: Path) -> Iterator[None]:
         yield
     finally:
         os.close(descriptor)
+
+
+def clear_workspace(root: Path) -> None:
+    if not root.exists():
+        return
+    with workspace_lock(root):
+        for item in root.iterdir():
+            if item.name == ".lock":
+                continue
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink(missing_ok=True)
+    shutil.rmtree(root, ignore_errors=True)

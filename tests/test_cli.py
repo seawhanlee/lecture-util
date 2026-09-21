@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from io import StringIO
 from datetime import date
 from pathlib import Path
@@ -297,7 +298,7 @@ class CliTests(unittest.TestCase):
 
     def test_execute_run_uses_cache_and_publishes_notes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             vault = root / "vault [blue] 한글 공백"
             terminal = StringIO()
             cache = root / "cache"
@@ -316,7 +317,7 @@ class CliTests(unittest.TestCase):
                 patch("lecture_util.pipeline.run_lecture", return_value=cached) as run_lecture,
                 patch("lecture_util.pipeline.ConsoleProgressReporter") as reporter,
                 patch("lecture_util.cli.console", Console(
-                    file=terminal, force_terminal=True, no_color=False, width=1000,
+                    file=terminal, force_terminal=True, no_color=False, width=1000, color_system="standard",
                 )),
             ):
                 selected = options()
@@ -335,7 +336,7 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(reporter.call_args.kwargs["source_url"], URL)
             self.assertEqual(run_lecture.call_args.args[0], URL)
-            self.assertEqual(run_lecture.call_args.args[1], cache)
+            self.assertEqual(run_lecture.call_args.args[1], cache.resolve())
             self.assertEqual(
                 run_lecture.call_args.kwargs["video_path"],
                 root / "videos" / COURSE / "1주차" / "압축성 유동.mp4",
@@ -446,6 +447,92 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         execute.assert_not_called()
         self.assertIn("Cancelled before processing", result.output)
+
+    def test_action_prompt_resolves_aliases(self) -> None:
+        from lecture_util.cli import ActionPrompt
+        prompt = ActionPrompt(choices=["retry", "clear-cache", "edit", "quit"])
+        for alias in ("c", "clean", "clear", "clear-cache", "CLEAR-CACHE"):
+            self.assertEqual(prompt.process_response(alias), "clear-cache")
+        for alias in ("r", "retry", "RETRY"):
+            self.assertEqual(prompt.process_response(alias), "retry")
+        for alias in ("e", "edit", "EDIT"):
+            self.assertEqual(prompt.process_response(alias), "edit")
+        for alias in ("q", "quit", "QUIT"):
+            self.assertEqual(prompt.process_response(alias), "quit")
+
+    def test_bare_command_failure_clear_cache_clears_workspace_and_forces_retry(self) -> None:
+        selected = options()
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli.run_tui", return_value=selected),
+            patch("lecture_util.cli._execute_run", side_effect=[LectureUtilError("corrupt cache"), None]) as execute,
+            patch("lecture_util.cli.ActionPrompt.ask", return_value="clear-cache") as prompt_ask,
+            patch("lecture_util.cli.clear_workspace") as mock_clear,
+        ):
+            result = self.runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(execute.call_count, 2)
+        # First call has force=False
+        self.assertFalse(execute.call_args_list[0].args[0].force)
+        # Second call has force=True
+        self.assertTrue(execute.call_args_list[1].args[0].force)
+        mock_clear.assert_called_once()
+        self.assertIn("Cleared cache", result.output)
+
+    def test_bare_command_failure_retry_keeps_force_false(self) -> None:
+        selected = options()
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli.run_tui", return_value=selected),
+            patch("lecture_util.cli._execute_run", side_effect=[LectureUtilError("temporary error"), None]) as execute,
+            patch("lecture_util.cli.ActionPrompt.ask", return_value="retry"),
+            patch("lecture_util.cli.clear_workspace") as mock_clear,
+        ):
+            result = self.runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(execute.call_count, 2)
+        self.assertFalse(execute.call_args_list[0].args[0].force)
+        self.assertFalse(execute.call_args_list[1].args[0].force)
+        mock_clear.assert_not_called()
+
+    def test_bare_command_failure_edit_reopens_tui_and_retries(self) -> None:
+        selected = options()
+        edited = replace(options(), title="Edited Title")
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli.run_tui", side_effect=[selected, edited]) as tui,
+            patch("lecture_util.cli._execute_run", side_effect=[LectureUtilError("error"), None]) as execute,
+            patch("lecture_util.cli.ActionPrompt.ask", return_value="edit"),
+        ):
+            result = self.runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(execute.call_args_list[1].args[0].title, "Edited Title")
+        tui.assert_called_with(config, initial=selected)
+
+    def test_bare_command_failure_quit_exits_with_code_1(self) -> None:
+        selected = options()
+        config = configured_defaults()
+        with (
+            patch("lecture_util.cli._interactive_terminal", return_value=True),
+            patch("lecture_util.cli.load_config", return_value=config),
+            patch("lecture_util.cli.run_tui", return_value=selected),
+            patch("lecture_util.cli._execute_run", side_effect=LectureUtilError("error")) as execute,
+            patch("lecture_util.cli.ActionPrompt.ask", return_value="quit"),
+        ):
+            result = self.runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertEqual(execute.call_count, 1)
 
     def test_onboard_replaces_existing_configuration(self) -> None:
         existing = configured_defaults(Path("/old-vault"))

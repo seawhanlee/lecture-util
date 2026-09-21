@@ -623,9 +623,10 @@ def _execute_run_locked(
             f" {published.summary} ({format_duration(monotonic() - started)})",
         ),
         highlight=False,
+        soft_wrap=True,
     )
     label = f"Video: {video}" if source.kind == "hls" else f"Source: {source.location}"
-    console.print(Text(label), highlight=False)
+    console.print(Text(label), highlight=False, soft_wrap=True)
 
 
 def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer, prompt: str) -> bool:
@@ -635,8 +636,12 @@ def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer,
     if not (stage.get("status") == "complete" and paths.transcript_json.is_file()
             and paths.transcript_markdown.is_file() and paths.summary.is_file()):
         return False
+    try:
+        transcript = load_transcript(paths.transcript_json)
+    except LectureUtilError:
+        return False
     return (stage.get("fingerprint") == summary_fingerprint(
-        load_transcript(paths.transcript_json), paths.transcript_markdown, summarizer, prompt,
+        transcript, paths.transcript_markdown, summarizer, prompt,
     ) and stage.get("sha256") == state.digest(paths.summary))
 
 

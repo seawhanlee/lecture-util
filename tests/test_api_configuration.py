@@ -176,7 +176,13 @@ def test_resume_preserves_api_and_legacy_request(config, tmp_path):
 def test_doctor_and_preflight_skip_local_backends(config, monkeypatch):
     from lecture_util.doctor import run_checks
     from lecture_util.transcription import preflight_transcription
-    with patch("lecture_util.configuration.load_config", return_value=config), patch("lecture_util.api_transcription.resolve_api_key", return_value="test"), patch("lecture_util.doctor.importlib.util.find_spec", side_effect=AssertionError("must not load local models")), patch("lecture_util.transcription.detect_device", side_effect=AssertionError("must not inspect GPU")):
+    with (
+        patch("lecture_util.configuration.load_config", return_value=config),
+        patch("lecture_util.api_transcription.resolve_api_key", return_value="test"),
+        patch("lecture_util.credentials.resolve_typesafe_api_key", return_value="test"),
+        patch("lecture_util.doctor.importlib.util.find_spec", side_effect=AssertionError("must not load local models")),
+        patch("lecture_util.transcription.detect_device", side_effect=AssertionError("must not inspect GPU")),
+    ):
         assert preflight_transcription(transcription_options(run_options(config))) == "openai"
         assert any(check.name == "OpenAI transcription" and check.ok for check in run_checks())
 

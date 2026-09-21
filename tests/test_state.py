@@ -93,3 +93,26 @@ def test_corrupt_state_is_preserved(tmp_path):
     with pytest.raises(LectureUtilError, match='Restore'):
         RunState(paths)
     assert paths.state.read_text() == '{broken'
+
+
+def test_clear_workspace_removes_all_files_and_root(tmp_path):
+    from lecture_util.state import clear_workspace, workspace_lock
+    workspace = tmp_path / "lecture-test"
+    workspace.mkdir()
+    (workspace / "transcript.json").write_text("{}")
+    (workspace / "audio.wav").write_bytes(b"wav")
+    subdir = workspace / "sub"
+    subdir.mkdir()
+    (subdir / "file.txt").write_text("hello")
+    with workspace_lock(workspace):
+        pass
+    assert (workspace / ".lock").is_file()
+    clear_workspace(workspace)
+    assert not workspace.exists()
+
+
+def test_clear_workspace_handles_nonexistent_directory(tmp_path):
+    from lecture_util.state import clear_workspace
+    workspace = tmp_path / "does-not-exist"
+    clear_workspace(workspace)
+    assert not workspace.exists()
