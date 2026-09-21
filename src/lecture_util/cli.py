@@ -122,6 +122,8 @@ def _execute_run(
     video_root: Path | None = None, cache_root: Path | None = None,
 ) -> None:
     if options.video_only:
+        if not options.course:
+            raise LectureUtilError("--video-only requires an explicit --course.")
         _execute_download(
             options.url, course=options.course, title=options.title,
             lecture_date=options.lecture_date,
@@ -224,7 +226,7 @@ def interactive_command(url: str = typer.Argument(..., metavar="SOURCE", help="P
 @app.command("run")
 def run_command(
     url: str = typer.Argument(..., metavar="SOURCE", help="Public .m3u8 URL or local media path"),
-    course: str = typer.Option(..., "--course", help="Course directory name"),
+    course: str | None = typer.Option(None, "--course", help="Course directory name (omit to auto-classify with Typesafe AI Jev)"),
     lecture_date: str = typer.Option(..., "--date", help="Lecture date (YYYY-MM-DD)"),
     semester_start: str | None = typer.Option(
         None,
@@ -281,6 +283,9 @@ def run_command(
             validate_hls_url(url)
         source = resolve_source(url)
         validated_url = source.location
+        selected_course = course.strip() if (course and course.strip()) else None
+        if video_only and not selected_course:
+            raise LectureUtilError("--video-only requires an explicit --course.")
         selected_prompt = "" if video_only else resolve_prompt(prompt, prompt_file)
         selected_llm_model = (
             config.llm_model
@@ -292,7 +297,7 @@ def run_command(
                 url=validated_url,
                 source=source,
                 video_only=video_only,
-                course=course,
+                course=selected_course,
                 lecture_date=lecture_date,
                 semester_start=semester_start or config.semester_start,
                 title=title,

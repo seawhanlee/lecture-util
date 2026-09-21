@@ -263,3 +263,64 @@ def test_failed_force_download_can_resume_replacement(tmp_path):
           patch('lecture_util.pipeline.tool_version', return_value='test')):
         download_stage(paths, state)
     assert paths.video.read_bytes() == b'new'
+
+
+def test_execute_run_with_auto_course_classification(tmp_path):
+    from unittest.mock import patch, MagicMock
+    from rich.console import Console
+    from io import StringIO
+    from lecture_util.pipeline import _execute_run_locked
+    from lecture_util.models import RunOptions, LecturePaths, CourseClassificationResult
+    from lecture_util.vault import COURSES_DIRECTORY
+
+    vault = tmp_path / "vault"
+    cache = tmp_path / "cache"
+    videos = tmp_path / "videos"
+
+    (vault / COURSES_DIRECTORY / "MachineLearning" / "Lectures").mkdir(parents=True)
+    (vault / COURSES_DIRECTORY / "OperatingSystems" / "Lectures").mkdir(parents=True)
+
+    cached = LecturePaths(cache / "lecture-test")
+    cached.root.mkdir(parents=True)
+    cached.summary.write_text("### 요약\n- 가상 메모리와 페이징 기법\n", encoding="utf-8")
+    cached.transcript_markdown.write_text("# Transcript\n내용\n", encoding="utf-8")
+    cached.video.write_bytes(b"temp-video")
+
+    options = RunOptions(
+        url="https://example.com/test.m3u8",
+        course=None,
+        lecture_date="2026-09-07",
+        title="페이징 기법",
+        llm_model=None,
+        tags=None,
+        whisper_model="large-v3",
+        language="ko",
+        device="auto",
+        prompt="",
+        force=False,
+    )
+
+    mock_classification = CourseClassificationResult(
+        selected_course="OperatingSystems",
+        confidence=0.94,
+        probabilities={"OperatingSystems": 0.94, "MachineLearning": 0.06},
+    )
+
+    terminal = StringIO()
+    with (
+        patch("lecture_util.pipeline.run_lecture", return_value=cached),
+        patch("lecture_util.classifier.classify_lecture_course", return_value=mock_classification),
+        patch("lecture_util.pipeline.publish_lecture_notes") as mock_publish,
+    ):
+        _execute_run_locked(
+            options,
+            vault_root=vault,
+            video_root=videos,
+            cache_root=cache,
+            console=Console(file=terminal, force_terminal=True),
+        )
+
+    mock_publish.assert_called_once()
+    published_course = mock_publish.call_args.kwargs["course"]
+    assert published_course.name == "OperatingSystems"
+

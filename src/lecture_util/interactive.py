@@ -50,14 +50,17 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
     table = Table(title="Choose a course")
     table.add_column("Number", justify="right")
     table.add_column("Course")
-    for number, course in enumerate(courses, 1):
-        table.add_row(str(number), Text(course.name))
+    if not video_only:
+        table.add_row("0", Text("[Auto-detect with Jev]", style="cyan"))
+    for number, course_item in enumerate(courses, 1):
+        table.add_row(str(number), Text(course_item.name))
     console.print(table)
+    valid_choices = [str(index) for index in range(0 if not video_only else 1, len(courses) + 1)]
     number = IntPrompt.ask(
-        "Course", choices=[str(index) for index in range(1, len(courses) + 1)],
-        default=1, console=console,
+        "Course", choices=valid_choices,
+        default=0 if not video_only else 1, console=console,
     )
-    course = courses[number - 1]
+    course = None if number == 0 else courses[number - 1]
     start = date.fromisoformat(config.semester_start)
     default_week = max(1, (date.today() - start).days // 7 + 1)
     while True:
@@ -80,26 +83,36 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
 
     def available_title(value: str) -> str:
         title = validate_title(value)
-        if not video_only:
+        if not video_only and course is not None:
             ensure_paths_available(published_lecture_paths(
                 course, lecture_date, title, semester_start=config.semester_start,
             ))
         return title
 
     title = _ask_validated(console, "Lecture title", available_title)
-    paths = published_lecture_paths(
-        course, lecture_date, title, semester_start=config.semester_start,
+    paths = (
+        published_lecture_paths(
+            course, lecture_date, title, semester_start=config.semester_start,
+        )
+        if course is not None else None
     )
-    video = lecture_video_path(
-        config.video_root, course, lecture_date, title,
-        semester_start=config.semester_start,
+    video = (
+        lecture_video_path(
+            config.video_root, course, lecture_date, title,
+            semester_start=config.semester_start,
+        )
+        if course is not None else None
     )
     preview = Table(title="Lecture settings", show_header=False)
     for label, value in (
-        ("Source", source.location), ("Course", course.name), ("Week", str(week)),
-        ("Date", lecture_date), ("Title", title),
-        ("Note", str(paths.summary)), ("Video" if source.kind == "hls" else "Original media",
-                                      str(video) if source.kind == "hls" else source.location),
+        ("Source", source.location),
+        ("Course", course.name if course else "[Auto-detect with Jev]"),
+        ("Week", str(week)),
+        ("Date", lecture_date),
+        ("Title", title),
+        ("Note", str(paths.summary) if paths else "(Auto-determined on publish)"),
+        ("Video" if source.kind == "hls" else "Original media",
+         str(video) if (source.kind == "hls" and video) else (source.location if source.kind != "hls" else "(Auto-determined on publish)")),
         ("Transcription", f"{config.transcription_provider} · {config.openai_transcription_model if config.transcription_provider == 'openai' else config.whisper_model} · {config.language}"),
         ("Codex model", config.llm_model or "Codex default"),
         ("Thinking effort", config.reasoning_effort or "Codex default"),
@@ -110,7 +123,7 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
     if not Confirm.ask("Start processing?", default=True, console=console):
         return None
     return RunOptions(
-        video_only=video_only, source=source, url=source.location, course=course.name, lecture_date=lecture_date, title=title,
+        video_only=video_only, source=source, url=source.location, course=course.name if course else None, lecture_date=lecture_date, title=title,
         semester_start=config.semester_start, llm_model=config.llm_model,
         reasoning_effort=config.reasoning_effort, tags=None,
         transcription_provider=config.transcription_provider,

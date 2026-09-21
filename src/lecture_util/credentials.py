@@ -76,3 +76,50 @@ def credential_status() -> str:
         return "OpenAI key registered." if stored_api_key() else "No OpenAI key registered."
     except LectureUtilError as error:
         return str(error)
+
+
+TYPESAFE_ACCOUNT = "typesafe-api-key"
+
+
+def stored_typesafe_api_key() -> str | None:
+    try:
+        return _backend().get_password(SERVICE, TYPESAFE_ACCOUNT)
+    except LectureUtilError:
+        raise
+    except Exception:
+        raise LectureUtilError("Could not read the TypeSafe key from OS credential storage.") from None
+
+
+def resolve_typesafe_api_key(required: bool = True) -> str | None:
+    key = os.environ.get("TYPESAFE_API_KEY", "").strip() or stored_typesafe_api_key()
+    if not key and required:
+        raise LectureUtilError(
+            "TypeSafe API key is missing. Set TYPESAFE_API_KEY in your environment or register it in OS credential storage."
+        )
+    return key or None
+
+
+def save_typesafe_api_key(value: str | None, *, delete: bool = False) -> None:
+    if not delete and not (value and value.strip()):
+        return
+    try:
+        backend = _backend()
+        if delete:
+            if backend.get_password(SERVICE, TYPESAFE_ACCOUNT) is not None:
+                backend.delete_password(SERVICE, TYPESAFE_ACCOUNT)
+        else:
+            backend.set_password(SERVICE, TYPESAFE_ACCOUNT, value.strip())
+    except LectureUtilError:
+        raise
+    except Exception:
+        raise LectureUtilError("Could not update the TypeSafe key in OS credential storage.") from None
+
+
+def typesafe_credential_status() -> str:
+    if os.environ.get("TYPESAFE_API_KEY", "").strip():
+        return "TYPESAFE_API_KEY is set and takes precedence over the stored key."
+    try:
+        return "TypeSafe key registered." if stored_typesafe_api_key() else "No TypeSafe key registered."
+    except LectureUtilError as error:
+        return str(error)
+

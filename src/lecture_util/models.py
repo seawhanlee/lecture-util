@@ -78,10 +78,17 @@ class LecturePaths:
         self.state = self.root / "run.json"
 
 
+@dataclass(frozen=True, slots=True)
+class CourseClassificationResult:
+    selected_course: str
+    confidence: float
+    probabilities: dict[str, float]
+
+
 @dataclass(slots=True)
 class RunOptions:
     url: str
-    course: str
+    course: str | None
     lecture_date: str
     title: str
     llm_model: str | None

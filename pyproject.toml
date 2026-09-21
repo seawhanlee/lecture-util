@@ -18,6 +18,7 @@ dependencies = [
     "nvidia-cublas-cu12>=12; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cudnn-cu12>=9; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "textual>=8.2.8",
+    "typesafe-sdk>=0.7.0",
 ]
 
 [dependency-groups]

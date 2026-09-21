@@ -220,7 +220,7 @@ Complete <Obsidian Vault>/10 Academics/Courses/공기역학특론/Lectures/1주�
 
 ## `run` 명령 사용법
 
-TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 입력 소스(HLS URL 또는 로컬 파일 경로), 과목, 날짜와 제목은 모두 필수입니다.
+TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 입력 소스(HLS URL 또는 로컬 파일 경로), 날짜와 제목은 필수입니다. `--course`는 생략할 수 있으며, 생략 시 전사와 요약을 완료한 후 **Typesafe AI의 Jev**를 활용하여 적절한 과목을 자동 판별합니다.
 
 ```bash
 uv run lecture-util run \
@@ -231,6 +231,24 @@ uv run lecture-util run \
 ```
 
 과목 이름은 `Courses` 아래의 실제 디렉터리 이름과 정확히 일치해야 합니다. 한 번에 강의 하나만 처리하며 URL 목록을 받는 `--input` 배치 모드는 지원하지 않습니다.
+
+### Typesafe AI Jev를 통한 과목 자동 분류
+
+`--course` 옵션을 지정하지 않으면 영상 다운로드(또는 로컬 미디어 준비), 오디오 추출, 전사, 요약 단계를 먼저 수행합니다. 요약이 완료된 후 생성된 `summary.md`의 구조화된 요약 내용과 강의 제목을 바탕으로 Typesafe AI의 System One 모델인 Jev(`Choice` primitive)를 호출하여 Vault 내의 과목 중 가장 적합한 과목을 자동으로 판별하고 해당 과목 폴더에 노트를 발행합니다.
+
+```bash
+# --course를 생략하면 Jev가 요약본을 분석하여 과목을 자동 결정합니다
+export TYPESAFE_API_KEY="your-typesafe-api-key"
+uv run lecture-util run \
+  'https://example.com/lecture/index.m3u8' \
+  --date 2026-09-04 \
+  --title '압축성 유동'
+```
+
+- **API 키 설정**: `TYPESAFE_API_KEY` 환경변수를 설정하거나 OS 키체인에 등록할 수 있습니다. `lecture-util doctor`로 키 등록 상태를 점검할 수 있습니다.
+- **대화형 / TUI 지원**: 대화형 프롬프트(`lecture-util URL`) 또는 TUI(`lecture-util`)에서도 과목 선택 목록에 `[Auto-detect with Jev]` 옵션이 제공됩니다.
+- **영상 저장**: HLS 비디오는 코스가 확정되기 전까지 캐시 워크스페이스에 임시 저장되며, Jev 판별로 과목이 결정된 후 최종 영상 보관 디렉터리로 안전하게 이동됩니다.
+- `--video-only` 모드는 전사와 요약을 건너뛰므로 명시적인 `--course` 지정이 필요합니다.
 
 기본 학기 시작일은 온보딩에서 저장한 값입니다. 시작일부터 7일씩 `1주차`, `2주차` 등으로 계산하며, 다른 기준일이 필요한 한 번의 실행에서는 `--semester-start`로 덮어쓸 수 있습니다.
 

@@ -84,10 +84,12 @@ class LectureSetupApp(FormApp[RunOptions]):
 
     def compose_fields(self) -> ComposeResult:
         lecture_date = _week_monday()
+        course_choices = [("[Auto-detect with Jev]", "__auto__")] + [(c.name, c.name) for c in self.courses]
         yield Label("Course", classes="field-label")
+        default_course = (self.initial.course if (self.initial and self.initial.course) else self.courses[0].name)
         yield Select(
-            tuple((course.name, course.name) for course in self.courses),
-            value=self.courses[0].name,
+            course_choices,
+            value=default_course,
             allow_blank=False,
             type_to_search=False,
             id="course",
@@ -172,32 +174,38 @@ class LectureSetupApp(FormApp[RunOptions]):
         if not is_url and mode_select.value != "full":
             mode_select.value = "full"
         video_only = mode_select.value == "video"
-        course = self._select_value("#course")
+        course_value = self._select_value("#course")
+        auto_course = course_value == "__auto__"
+        course_label = "[Auto-detect with Jev]" if auto_course else course_value
         title = self.value("lecture-title") or "Untitled lecture"
         lecture_date = self.value("lecture-date") or "Choose a date"
-        destination = "Complete the date and title to preview the note path."
-        try:
-            paths = published_lecture_paths(
-                next(item for item in self.courses if item.name == course),
-                validate_lecture_date(self.value("lecture-date")),
-                validate_title(self.value("lecture-title")),
-                semester_start=validate_semester_start(self.value("semester-start")),
-            )
-            destination = str(paths.summary)
-        except (LectureUtilError, StopIteration):
-            pass
-        if video_only:
+        destination = "Auto-determined with Jev after transcription & summary." if auto_course else "Complete the date and title to preview the note path."
+        if not auto_course:
             try:
-                destination = str(lecture_video_path(
-                    self.config.video_root,
-                    next(item for item in self.courses if item.name == course),
-                    self.value("lecture-date"), title,
-                    semester_start=self.value("semester-start"),
-                ))
+                paths = published_lecture_paths(
+                    next(item for item in self.courses if item.name == course_value),
+                    validate_lecture_date(self.value("lecture-date")),
+                    validate_title(self.value("lecture-title")),
+                    semester_start=validate_semester_start(self.value("semester-start")),
+                )
+                destination = str(paths.summary)
             except (LectureUtilError, StopIteration):
-                destination = "Complete the date and title to preview the video path."
+                pass
+        if video_only:
+            if auto_course:
+                destination = "Choose an explicit course for video-only mode."
+            else:
+                try:
+                    destination = str(lecture_video_path(
+                        self.config.video_root,
+                        next(item for item in self.courses if item.name == course_value),
+                        self.value("lecture-date"), title,
+                        semester_start=self.value("semester-start"),
+                    ))
+                except (LectureUtilError, StopIteration):
+                    destination = "Complete the date and title to preview the video path."
             self.query_one("#preview-content", Label).update(
-                f"{course}\n{lecture_date}\n{title}\n\nVIDEO DESTINATION\n{destination}"
+                f"{course_label}\n{lecture_date}\n{title}\n\nVIDEO DESTINATION\n{destination}"
             )
             return
         mode = self._select_value("#prompt-mode")
@@ -212,7 +220,7 @@ class LectureSetupApp(FormApp[RunOptions]):
         )
         transcription = self.query_one(TranscriptionSettings).preview()
         self.query_one("#preview-content", Label).update(
-            f"{course}\n{lecture_date}\n{title}\n\n"
+            f"{course_label}\n{lecture_date}\n{title}\n\n"
             f"NOTE DESTINATION\n{destination}\n\n"
             f"TRANSCRIPTION\n{transcription}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}\n\n"
@@ -262,7 +270,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             self.query_one(f"#{field}", Input).value = value or ""
         self.query_one("#transcription-provider", Select).value = options.transcription_provider
         self.query_one("#openai-transcription-model", Select).value = options.openai_transcription_model
-        self.query_one("#course", Select).value = options.course
+        self.query_one("#course", Select).value = options.course if options.course else "__auto__"
         self.query_one("#device", Select).value = options.device
         self.query_one("#compute-type", Select).value = options.compute_type
         self.query_one("#force", Checkbox).value = options.force
@@ -287,13 +295,19 @@ class LectureSetupApp(FormApp[RunOptions]):
         self.error_field = "lecture-title"
         title = validate_title(self.query_one("#lecture-title", Input).value)
         self.error_field = "course"
-        course_name = self._select_value("#course")
-        course = resolve_course(course_name, self.vault_root)
+        course_choice = self._select_value("#course")
+        auto_course = course_choice == "__auto__"
+        course_name = None if auto_course else course_choice
+        course = resolve_course(course_name, self.vault_root) if course_name else None
         self.checked("lecture-date", lambda: lecture_week(lecture_date, semester_start))
         if self._select_value("#processing-mode") == "video":
+            if auto_course:
+                self.error_field = "course"
+                raise LectureUtilError("Video-only mode requires an explicit course.")
             if source.kind != "hls":
                 self.error_field = "source"
                 raise LectureUtilError("Video-only mode requires a public .m3u8 URL.")
+            assert course_name is not None
             return RunOptions(
                 url=source.location, source=source, video_only=True,
                 course=course_name, lecture_date=lecture_date, title=title,
@@ -301,16 +315,18 @@ class LectureSetupApp(FormApp[RunOptions]):
                 whisper_model="", language="", device="auto", prompt="",
                 force=self.query_one("#force", Checkbox).value,
             )
-        self.error_field = "lecture-title"
-        ensure_paths_available(
-            published_lecture_paths(
-                course,
-                lecture_date,
-                title,
-                semester_start=semester_start,
-            ),
-            journal=default_cache_root() / f"lecture-{lecture_id(source.cache_key)}" / "publication.json",
-        )
+        if not auto_course:
+            assert course is not None
+            self.error_field = "lecture-title"
+            ensure_paths_available(
+                published_lecture_paths(
+                    course,
+                    lecture_date,
+                    title,
+                    semester_start=semester_start,
+                ),
+                journal=default_cache_root() / f"lecture-{lecture_id(source.cache_key)}" / "publication.json",
+            )
 
         self.error_field = "prompt-mode"
         prompt_mode = self._select_value("#prompt-mode")

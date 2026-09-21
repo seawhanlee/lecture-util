@@ -581,3 +581,26 @@ def test_explicit_beam_default_resets_saved_value(tmp_path):
         result = CliRunner().invoke(app, ['transcribe', str(tmp_path), '--beam-size', 'default'])
     assert result.exit_code == 0, result.output
     assert transcribe.call_args.kwargs['beam_size'] is None
+
+
+def test_run_without_course_invokes_with_none():
+    from unittest.mock import patch
+    runner = CliRunner()
+    with (
+        patch("lecture_util.cli.load_config", return_value=configured_defaults()),
+        patch("lecture_util.cli._execute_run") as mock_execute,
+    ):
+        result = runner.invoke(app, ["run", "https://example.com/test.m3u8", "--date", "2026-09-07", "--title", "테스트 강의"])
+    assert result.exit_code == 0, result.output
+    options = mock_execute.call_args.args[0]
+    assert options.course is None
+
+
+def test_run_video_only_without_course_fails():
+    from unittest.mock import patch
+    runner = CliRunner()
+    with patch("lecture_util.cli.load_config", return_value=configured_defaults()):
+        result = runner.invoke(app, ["run", "https://example.com/test.m3u8", "--date", "2026-09-07", "--title", "테스트 강의", "--video-only"])
+    assert result.exit_code != 0
+    assert "--video-only requires an explicit --course" in result.output
+
