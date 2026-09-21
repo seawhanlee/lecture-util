@@ -90,6 +90,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             create_vault(vault)
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
+                self.assertEqual(app.query_one("#course", Select).value, "__auto__")
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
                 app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "압축성 유동"
@@ -101,7 +102,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(options)
         assert options is not None
         self.assertEqual(options.url, URL)
-        self.assertEqual(options.course, COURSE)
+        self.assertIsNone(options.course)
         self.assertEqual(options.lecture_date, "2026-09-04")
         self.assertEqual(options.semester_start, "2026-08-31")
         self.assertEqual(options.title, "압축성 유동")
@@ -111,6 +112,24 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options.language, "auto")
         self.assertEqual(options.prompt, DEFAULT_PROMPT)
         self.assertFalse(options.force)
+
+    async def test_explicit_course_selection_builds_vault_run_options(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            create_vault(vault)
+            app = LectureSetupApp(vault)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one("#course", Select).value = COURSE
+                app.query_one("#lecture-date", Input).value = "2026-09-04"
+                app.query_one("#semester-start", Input).value = "2026-08-31"
+                app.query_one("#lecture-title", Input).value = "압축성 유동"
+                app.query_one("#source", Input).value = URL
+                await pilot.click("#run")
+
+        options = app.return_value
+        self.assertIsNotNone(options)
+        assert options is not None
+        self.assertEqual(options.course, COURSE)
 
     async def test_course_choices_and_prompt_file_are_loaded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -128,6 +147,8 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 [COURSE, "문제해결을 위한 글쓰기"],
             )
             async with app.run_test(size=(100, 40)):
+                self.assertEqual(app.query_one("#course", Select).value, "__auto__")
+                app.query_one("#course", Select).value = COURSE
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
                 app.query_one("#semester-start", Input).value = "2026-09-01"
                 app.query_one("#lecture-title", Input).value = "강의개요"
@@ -152,11 +173,16 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
 
             async with app.run_test(size=(100, 40)) as pilot:
                 course = app.query_one("#course", Select)
+                self.assertEqual(course.value, "__auto__")
                 course.focus()
                 await pilot.press("space")
                 self.assertTrue(course.expanded)
 
                 await pilot.press("down", "space")
+                self.assertEqual(course.value, COURSE)
+                self.assertFalse(course.expanded)
+
+                await pilot.press("space", "down", "space")
                 self.assertEqual(course.value, second_course)
                 self.assertFalse(course.expanded)
 
@@ -198,6 +224,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
                 app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "강의개요"
                 app.query_one("#source", Input).value = URL
+                app.query_one("#course", Select).value = COURSE
                 app.query_one("#course", Select).focus()
                 await pilot.press("ctrl+r")
 
@@ -237,6 +264,7 @@ class TuiTests(unittest.IsolatedAsyncioTestCase):
             existing.write_text("existing", encoding="utf-8")
             app = LectureSetupApp(vault)
             async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one("#course", Select).value = COURSE
                 app.query_one("#lecture-date", Input).value = "2026-09-04"
                 app.query_one("#semester-start", Input).value = "2026-08-31"
                 app.query_one("#lecture-title", Input).value = "압축성 유동"
@@ -411,6 +439,7 @@ class VideoOnlyTuiTests(unittest.IsolatedAsyncioTestCase):
                 app.query_one('#source', Input).value = URL
                 await pilot.pause()
                 app.query_one('#processing-mode', Select).value = 'video'
+                app.query_one('#course', Select).value = COURSE
                 app.query_one('#lecture-title', Input).value = 'Lecture'
                 app.query_one('#lecture-date', Input).value = '2026-09-07'
                 app.query_one('#whisper-model', Input).value = ''
@@ -425,6 +454,22 @@ class VideoOnlyTuiTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertTrue(app.query_one('#processing-mode', Select).disabled)
                 self.assertEqual(app.query_one('#processing-mode', Select).value, 'full')
+
+    async def test_video_only_requires_explicit_course(self):
+        from lecture_util.errors import LectureUtilError
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / 'vault'
+            create_vault(vault)
+            app = configured_app(vault)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one('#source', Input).value = URL
+                await pilot.pause()
+                app.query_one('#processing-mode', Select).value = 'video'
+                app.query_one('#lecture-title', Input).value = 'Lecture'
+                app.query_one('#lecture-date', Input).value = '2026-09-07'
+                with self.assertRaises(LectureUtilError) as cm:
+                    app._build_options()
+                self.assertIn("Video-only mode requires an explicit course", str(cm.exception))
 
 
 @pytest.fixture(autouse=True)
@@ -467,3 +512,21 @@ class RecoveryFormTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 restored = app._build_options()
                 assert restored == initial
+
+    async def test_restores_auto_course(self):
+        from lecture_util.models import RunOptions
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            config = configured_app(root).config
+            initial = RunOptions(URL, None, '2026-09-07', 'Saved', 'gpt-test', ['tag'],
+                                 'turbo', 'ko', 'cpu', 'Saved\nprompt', False,
+                                 '2026-08-31', 'high', 'int8', 4, 1)
+            from lecture_util.media import resolve_source
+            initial.source = resolve_source(initial.url)
+            app = LectureSetupApp(config=config, initial=initial)
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                restored = app._build_options()
+                assert restored == initial
+                assert restored.course is None

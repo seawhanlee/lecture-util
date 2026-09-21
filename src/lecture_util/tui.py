@@ -86,7 +86,7 @@ class LectureSetupApp(FormApp[RunOptions]):
         lecture_date = _week_monday()
         course_choices = [("[Auto-detect with Jev]", "__auto__")] + [(c.name, c.name) for c in self.courses]
         yield Label("Course", classes="field-label")
-        default_course = (self.initial.course if (self.initial and self.initial.course) else self.courses[0].name)
+        default_course = (self.initial.course if (self.initial and self.initial.course) else "__auto__")
         yield Select(
             course_choices,
             value=default_course,

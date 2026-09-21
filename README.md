@@ -153,7 +153,7 @@ uv run lecture-util
 
 | 항목 | 설명 |
 | --- | --- |
-| Course | Vault에서 자동 탐색한 과목 선택지 |
+| Course | Vault에서 자동 탐색한 과목 선택지 (기본값: [Auto-detect with Jev] 자동 판별) |
 | Lecture date | 강의 날짜. 기본값은 프로그램을 실행한 주의 월요일이며 `YYYY-MM-DD` 형식으로 수정 가능 |
 | Lecture title | 파일명과 노트 제목에 사용할 강의 제목 |
 | HLS URL or local media path | 공개 HLS URL 또는 로컬 영상·녹음 파일 경로 |
@@ -246,7 +246,7 @@ uv run lecture-util run \
 ```
 
 - **API 키 설정**: `TYPESAFE_API_KEY` 환경변수를 설정하거나 OS 키체인에 등록할 수 있습니다. `lecture-util doctor`로 키 등록 상태를 점검할 수 있습니다.
-- **대화형 / TUI 지원**: 대화형 프롬프트(`lecture-util URL`) 또는 TUI(`lecture-util`)에서도 과목 선택 목록에 `[Auto-detect with Jev]` 옵션이 제공됩니다.
+- **대화형 / TUI 지원**: 대화형 프롬프트(`lecture-util URL`) 및 TUI(`lecture-util`) 모두 과목 선택의 기본값으로 `[Auto-detect with Jev]` 옵션이 지정됩니다.
 - **영상 저장**: HLS 비디오는 코스가 확정되기 전까지 캐시 워크스페이스에 임시 저장되며, Jev 판별로 과목이 결정된 후 최종 영상 보관 디렉터리로 안전하게 이동됩니다.
 - `--video-only` 모드는 전사와 요약을 건너뛰므로 명시적인 `--course` 지정이 필요합니다.
 
