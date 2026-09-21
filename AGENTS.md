@@ -51,6 +51,13 @@ Recent history uses concise Conventional Commit prefixes such as `feat:`, `fix:`
 
 Create a commit after every major edit once the relevant tests or checks pass. Keep each commit focused on one coherent change, use a Conventional Commit subject, and do not include unrelated user changes or generated artifacts. Minor follow-up edits may be grouped with the major edit they complete.
 
+## Versioning Guidelines
+
+Manage the project version in `pyproject.toml` and keep `uv.lock` synchronized:
+- When a new feature is added, bump the version by `0.1` (e.g., `0.1.0` → `0.2.0`).
+- For bug fixes or minor updates, bump the version by `0.0.1` (e.g., `0.1.0` → `0.1.1`).
+Include the version update in the same change as the feature or fix.
+
 ## Security & Configuration
 
 Only process lecture URLs the user is authorized to download. Do not commit credentials, private course URLs, downloaded media, transcripts, model caches, or generated output directories.
