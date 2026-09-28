@@ -12,20 +12,40 @@ from lecture_util.models import CourseClassificationResult
 from lecture_util.vault import Course
 
 
+def is_transcript_file(path: Path) -> bool:
+    """Determine whether a markdown file is a lecture transcript."""
+    name = path.stem
+    if name.startswith("."):
+        return True
+    try:
+        header = path.read_text(encoding="utf-8", errors="ignore")[:300]
+        if "type: lecture-transcript" in header:
+            return True
+        if "type: lecture" in header:
+            return False
+    except OSError:
+        pass
+    return (
+        name.endswith(" 전사")
+        or name.endswith(".transcript")
+        or name.endswith(" transcript")
+        or name.endswith(".transcription")
+    )
+
+
 def extract_lecture_titles(course: Course, limit: int = 5) -> list[str]:
     """Scan existing markdown notes in the course to extract representative lecture titles."""
     titles: list[str] = []
     if not course.lectures.is_dir():
         return titles
     for path in sorted(course.lectures.rglob("*.md")):
-        name = path.stem
-        # Exclude transcript files if named .transcript
-        if name.endswith(".transcript") or name.startswith("."):
+        if is_transcript_file(path):
             continue
-        titles.append(name)
+        titles.append(path.stem)
         if len(titles) >= limit:
             break
     return titles
+
 
 
 def build_course_criteria(courses: list[Course]) -> dict[str, str]:

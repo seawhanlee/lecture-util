@@ -22,13 +22,30 @@ class ClassifierTests(unittest.TestCase):
             root = Path(temp_dir)
             lectures = root / "Lectures" / "1주차"
             lectures.mkdir(parents=True)
-            (lectures / "01. Introduction to ML.md").write_text("# Intro", encoding="utf-8")
-            (lectures / "02. Linear Regression.md").write_text("# Reg", encoding="utf-8")
-            (lectures / "01. Introduction to ML.transcript.md").write_text("# Tr", encoding="utf-8")
+            (lectures / "2026-09-04 머신러닝 개론.md").write_text(
+                "---\ntype: lecture\n---\n# Intro", encoding="utf-8"
+            )
+            (lectures / "2026-09-04 머신러닝 개론 전사.md").write_text(
+                "---\ntype: lecture-transcript\n---\n# Transcript", encoding="utf-8"
+            )
+            (lectures / "2026-09-11 선형 회귀.md").write_text("# Reg", encoding="utf-8")
+            (lectures / "2026-09-11 선형 회귀.transcript.md").write_text("# Tr", encoding="utf-8")
+            # Note ending in '전사' (e.g. History lecture about warriors) with type: lecture should be preserved
+            (lectures / "2026-09-18 고대 로마의 전사.md").write_text(
+                "---\ntype: lecture\n---\n# Roman Warriors", encoding="utf-8"
+            )
 
             course = Course("머신러닝", root, root / "Lectures")
             titles = extract_lecture_titles(course)
-            self.assertEqual(titles, ["01. Introduction to ML", "02. Linear Regression"])
+            self.assertEqual(
+                titles,
+                [
+                    "2026-09-04 머신러닝 개론",
+                    "2026-09-11 선형 회귀",
+                    "2026-09-18 고대 로마의 전사",
+                ],
+            )
+
 
     def test_build_course_criteria(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
