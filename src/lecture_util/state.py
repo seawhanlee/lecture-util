@@ -257,3 +257,34 @@ def clear_workspace(root: Path) -> None:
             else:
                 item.unlink(missing_ok=True)
     shutil.rmtree(root, ignore_errors=True)
+
+
+def is_workspace_locked(root: Path) -> bool:
+    lock_file = root / ".lock"
+    if not lock_file.exists():
+        return False
+    try:
+        with lock_file.open("a") as stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(stream, fcntl.LOCK_UN)
+                return False
+            except BlockingIOError:
+                return True
+    except OSError:
+        return False
+
+
+def clear_workspace_audio(root: Path) -> int:
+    freed = 0
+    with workspace_lock(root):
+        audio_file = root / "audio.wav"
+        if audio_file.is_file():
+            freed += audio_file.stat().st_size
+            audio_file.unlink(missing_ok=True)
+        for item in root.glob(".audio.wav.*"):
+            if item.is_file():
+                freed += item.stat().st_size
+                item.unlink(missing_ok=True)
+    return freed
+

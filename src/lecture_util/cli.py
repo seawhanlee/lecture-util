@@ -12,7 +12,7 @@ from typer.core import TyperGroup
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 
 from lecture_util.configuration import (
     validate_provider_overrides,
@@ -534,3 +534,206 @@ def resume_command(lecture_dir: Path = typer.Argument(..., exists=True, file_oka
         _execute_run(options, vault_root=vault, video_root=videos,
                      cache_root=lecture_dir.resolve().parent)
     _run_or_exit(action)
+
+
+cache_app = typer.Typer(
+    name="cache",
+    help="Inspect and prune cached media and workspaces.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+
+def _execute_cache_list(cache_root: Path | None = None) -> None:
+    def action() -> None:
+        from lecture_util.cache import get_storage_summary, scan_cached_lectures
+        from lecture_util.progress import format_size
+
+        config = load_config(validate_vault=False)
+        video_root = config.video_root if config else None
+        root = (cache_root or default_cache_root()).expanduser().resolve()
+        lectures = scan_cached_lectures(root)
+        summary = get_storage_summary(root, video_root)
+
+        if not lectures:
+            console.print(f"[dim]No cached lectures found in {root}[/dim]")
+            if summary.video_root and summary.video_root.is_dir():
+                console.print(
+                    f"Video storage: {summary.video_count} videos "
+                    f"({format_size(summary.total_video_size)}) in {summary.video_root}"
+                )
+            return
+
+        table = Table(title=f"Cached Lectures ({root})", expand=False)
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("Date", style="dim", no_wrap=True)
+        table.add_column("Course", style="bold", overflow="fold")
+        table.add_column("Title", overflow="fold")
+        table.add_column("Status")
+        table.add_column("Audio", justify="right")
+        table.add_column("Total", justify="right")
+
+        for item in lectures:
+            date_str = item.lecture_date or (
+                item.updated_at.strftime("%Y-%m-%d") if item.updated_at else "-"
+            )
+            course_str = item.course or "-"
+            title_str = item.title or "-"
+            audio_str = format_size(item.audio_size) if item.audio_size > 0 else "-"
+            total_str = format_size(item.total_size)
+            table.add_row(
+                item.lecture_id,
+                date_str,
+                course_str,
+                title_str,
+                item.display_status,
+                audio_str,
+                total_str,
+            )
+
+
+        console.print(table)
+        console.print(
+            f"Total: {summary.total_lectures} lectures "
+            f"({format_size(summary.total_cache_size)} total, "
+            f"{format_size(summary.total_audio_size)} audio)"
+        )
+        if summary.video_root and summary.video_root.is_dir():
+            console.print(
+                f"Video storage: {summary.video_count} videos "
+                f"({format_size(summary.total_video_size)}) in {summary.video_root}"
+            )
+
+    _run_or_exit(action)
+
+
+def _execute_cache_prune(
+    *,
+    lecture_ids: list[str] | None,
+    all_workspaces: bool,
+    audio_only: bool,
+    days: int | None,
+    dry_run: bool,
+    yes: bool,
+    cache_root: Path | None,
+) -> None:
+    def action() -> None:
+        from lecture_util.cache import execute_prune, filter_prunable_lectures, scan_cached_lectures
+        from lecture_util.progress import format_size
+
+        root = (cache_root or default_cache_root()).expanduser().resolve()
+        lectures = scan_cached_lectures(root)
+        targets = filter_prunable_lectures(
+            lectures,
+            lecture_ids=lecture_ids,
+            all_workspaces=all_workspaces,
+            audio_only=audio_only,
+            days=days,
+        )
+
+        if not targets:
+            console.print("No cached lectures matched the prune criteria.")
+            return
+
+        target_bytes = sum(t.audio_size if audio_only else t.total_size for t in targets)
+        desc = "audio files" if audio_only else "workspaces"
+        console.print(
+            f"Found {len(targets)} {desc} to prune ({format_size(target_bytes)}):"
+        )
+        for item in targets:
+            label = (
+                f"{item.course} · {item.title}"
+                if (item.course and item.title)
+                else (item.title or item.url or item.lecture_id)
+            )
+            size = format_size(item.audio_size if audio_only else item.total_size)
+            console.print(f"  • [{item.lecture_id}] {label} ({size})")
+
+        if dry_run:
+            console.print(
+                f"[yellow]Dry run:[/yellow] Would reclaim {format_size(target_bytes)}. No files were deleted."
+            )
+            return
+
+        if not yes:
+            if not _interactive_terminal():
+                raise LectureUtilError("Pruning in non-interactive mode requires --yes.")
+            action_prompt = f"Delete {desc} from {len(targets)} cached lecture(s) ({format_size(target_bytes)})?"
+            if not Confirm.ask(action_prompt, default=False, console=console):
+                console.print("Pruning cancelled.")
+                return
+
+        result = execute_prune(targets, audio_only=audio_only, dry_run=False)
+        count = result.audio_files_pruned if audio_only else result.workspaces_pruned
+        console.print(
+            f"[green]Success:[/green] Reclaimed {format_size(result.reclaimed_bytes)} "
+            f"across {count} lecture(s)."
+        )
+        if result.skipped_locked > 0:
+            console.print(
+                f"[yellow]Warning:[/yellow] Skipped {result.skipped_locked} active (locked) workspace(s)."
+            )
+
+    _run_or_exit(action)
+
+
+@cache_app.callback(invoke_without_command=True)
+def cache_callback(
+    ctx: typer.Context,
+    cache_root: Path | None = typer.Option(
+        None, "--cache-root", help="Custom cache root directory",
+    ),
+) -> None:
+    """Inspect and prune cached media and workspaces."""
+    if ctx.invoked_subcommand is None:
+        _execute_cache_list(cache_root)
+
+
+@cache_app.command("list")
+def cache_list_command(
+    cache_root: Path | None = typer.Option(
+        None, "--cache-root", help="Custom cache root directory",
+    ),
+) -> None:
+    """List cached lecture workspaces and disk usage."""
+    _execute_cache_list(cache_root)
+
+
+@cache_app.command("prune")
+def cache_prune_command(
+    lecture_ids: list[str] = typer.Argument(
+        None, metavar="[LECTURE_ID...]", help="Specific lecture IDs to prune",
+    ),
+    all_workspaces: bool = typer.Option(
+        False, "--all", "-a", help="Prune all cached workspaces, not just completed ones",
+    ),
+    audio_only: bool = typer.Option(
+        False, "--audio-only", help="Only delete audio.wav, keeping transcripts and summaries",
+    ),
+    days: int | None = typer.Option(
+        None, "--days", "-d", min=0, help="Only prune entries older than N days",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-n", help="Show what would be pruned without deleting files",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Do not prompt for confirmation",
+    ),
+    cache_root: Path | None = typer.Option(
+        None, "--cache-root", help="Custom cache root directory",
+    ),
+) -> None:
+    """Prune cached audio files or entire workspaces to reclaim disk space."""
+    _execute_cache_prune(
+        lecture_ids=lecture_ids,
+        all_workspaces=all_workspaces,
+        audio_only=audio_only,
+        days=days,
+        dry_run=dry_run,
+        yes=yes,
+        cache_root=cache_root,
+    )
+
+
+app.add_typer(cache_app, name="cache")
+

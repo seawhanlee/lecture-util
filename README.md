@@ -488,7 +488,7 @@ MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차�
 └── publication.json
 ```
 
-`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그, 입력·출력 지문과 각 단계의 상태가 기록됩니다. `request.json`은 재개에 필요한 입력과 프롬프트 본문을 보관하고, `publication.json`은 게시할 두 노트의 내용·지문·상태를 보관합니다. `openai-chunks/`도 전사 본문을 포함하는 비공개 중간 산출물입니다. 이 파일들은 캐시에만 저장되며 저장소에 커밋하지 않습니다. 캐시와 영상은 자동 삭제하지 않습니다.
+`run.json`에는 원본 URL, 과목, 날짜, 제목, 영상 및 Vault 발행 경로, 태그, 입력·출력 지문과 각 단계의 상태가 기록됩니다. `request.json`은 재개에 필요한 입력과 프롬프트 본문을 보관하고, `publication.json`은 게시할 두 노트의 내용·지문·상태를 보관합니다. `openai-chunks/`도 전사 본문을 포함하는 비공개 중간 산출물입니다. 이 파일들은 캐시에만 저장되며 저장소에 커밋하지 않습니다. 캐시와 영상은 자동 삭제하지 않으며, `lecture-util cache` 명령으로 언제든지 확인 및 정리할 수 있습니다.
 
 ### 기존 설정과 영상 옮기기
 
@@ -595,7 +595,51 @@ uv run lecture-util summarize LECTURE_DIR \
 
 `LECTURE_DIR/transcript.json`과 `transcript.md`를 읽어 `summary.md`를 만듭니다. 이 명령 역시 Obsidian 노트를 발행하지 않으므로 최종 Vault 발행이 필요하면 같은 소스와 강의 정보로 전체 `run` 명령을 실행하거나, 기록된 전체 실행이 있다면 `resume`을 사용하세요. 완료된 캐시 단계는 재사용됩니다.
 
+### 캐시 및 디스크 용량 관리
+
+다운로드 및 추출된 오디오(`audio.wav`)와 중간 산출물(`~/.cache/lecture-util`)은 자동 삭제되지 않으므로, 강의가 누적되면 디스크 용량을 점유하게 됩니다. `cache` 명령으로 캐시 상태를 점검하고 불필요한 파일을 정리할 수 있습니다.
+
+#### 캐시 목록 및 용량 조회
+
+```bash
+uv run lecture-util cache
+# 또는
+uv run lecture-util cache list
+```
+
+캐시된 강의 ID, 날짜, 과목, 제목, 처리 상태, 오디오 크기, 총 작업공간 크기와 함께 설정된 동영상 보관소의 전체 영상 개수 및 용량 요약을 표시합니다.
+
+#### 캐시 정리 (Prune)
+
+기본적으로 Vault 발행이 완료된(`Published`) 강의 캐시만 정리 대상으로 삼아 미완료/실패한 작업공간이 실수로 지워지는 것을 방지합니다.
+
+```bash
+# 발행 완료된 캐시 정리 (확인 후 삭제)
+uv run lecture-util cache prune
+
+# 삭제 대상과 확보 예상 용량만 미리 확인 (실제 파일 삭제 안 함)
+uv run lecture-util cache prune --dry-run
+
+# 대용량 오디오(audio.wav)만 삭제하고 전사문·요약·실행 메타데이터는 보존
+uv run lecture-util cache prune --audio-only
+
+# 생성/수정된 지 14일 이상 지난 발행 캐시만 정리
+uv run lecture-util cache prune --days 14
+
+# 미완료/실패한 캐시를 포함하여 모든 작업공간 정리
+uv run lecture-util cache prune --all
+
+# 특정 강의 ID의 캐시만 지정하여 정리
+uv run lecture-util cache prune 0123456789
+
+# 대화형 프롬프트 없이 즉시 삭제 (--dry-run 제외)
+uv run lecture-util cache prune --yes
+```
+
+현재 다른 프로세스에서 처리 중인 잠긴(`locked`) 작업공간은 안전을 위해 정리 대상에서 자동으로 제외됩니다.
+
 ## 전사 최적화와 비교 측정
+
 
 기본 모델과 품질 설정은 유지됩니다. faster-whisper에서만 다음 옵션을 적용할 수 있습니다.
 
