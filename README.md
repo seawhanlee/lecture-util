@@ -53,6 +53,19 @@ N주차/
 
 Codex 로그인을 포함한 Codex 자체 설정은 먼저 완료되어 있어야 합니다. 모델을 별도로 지정하지 않으면 Codex CLI에 설정된 기본 모델을 사용합니다.
 
+### wheel로 CLI 설치
+
+[GitHub Releases](https://github.com/seawhanlee/lecture-util/releases)에서 `.whl`을 내려받아 독립 CLI로 설치할 수 있습니다.
+
+```bash
+uv tool install ./lecture_util-0.3.5-py3-none-any.whl
+lecture-util doctor
+lecture-util onboard
+lecture-util
+```
+
+Python 패키지 의존성은 자동 설치됩니다. FFmpeg·ffprobe·yt-dlp·Codex CLI와 로컬 GPU 전사에 필요한 드라이버는 별도로 준비하세요. wheel 설치 후에는 이 문서의 `uv run lecture-util ...` 대신 `lecture-util ...`로 실행합니다. 새 wheel로 교체하려면 `uv tool install --force ./새버전.whl`을 사용합니다.
+
 ### Apple Silicon macOS
 
 ```bash
@@ -722,6 +735,20 @@ uv build
 ```
 
 테스트에는 임시 Vault를 사용한 과목 탐색·충돌·노트 발행 테스트와 작은 로컬 HLS 스트림을 생성하는 실제 `yt-dlp`/FFmpeg 통합 테스트가 포함됩니다. 테스트는 실제 Vault에 파일을 만들지 않습니다.
+
+### GitHub 자동 빌드와 릴리스
+
+`Build distributions` 워크플로는 `master` push 또는 Actions 화면의 수동 실행 시 wheel과 소스 배포본을 생성합니다. 실행 결과의 `lecture-util-dist` artifact에서 내려받을 수 있으며 보관 기간은 30일입니다.
+
+`pyproject.toml`과 `uv.lock`의 버전을 맞춘 커밋에 `v버전` 태그를 push하면 빌드 성공 후 GitHub Release를 생성하고 `.whl`과 `.tar.gz`를 첨부합니다. 태그와 패키지 버전이 다르면 릴리스 전에 실패합니다.
+
+```bash
+git push origin master
+git tag v0.3.5
+git push origin v0.3.5
+```
+
+다음 릴리스에서는 태그를 새 패키지 버전으로 바꾸세요. GitHub의 기본 `GITHUB_TOKEN`을 사용하므로 별도 배포 토큰 설정은 필요하지 않습니다.
 
 관련 문서:
 
