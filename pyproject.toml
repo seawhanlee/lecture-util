@@ -1,6 +1,6 @@
 [project]
 name = "lecture-util"
-version = "0.3.1"
+version = "0.3.2"
 description = "Download HLS lectures, transcribe them locally or with OpenAI, and create LLM study notes"
 readme = "README.md"
 authors = [

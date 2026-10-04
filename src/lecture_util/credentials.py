@@ -32,7 +32,8 @@ def _backend() -> KeyringBackend:
     except Exception:
         raise LectureUtilError(
             "OS credential storage is unavailable. Unlock macOS Keychain or Linux Secret Service; "
-            "alternatively set OPENAI_API_KEY."
+            "on WSL or headless Linux, set OPENAI_API_KEY for transcription "
+            "or TYPESAFE_API_KEY for auto-classification."
         ) from None
 
 
@@ -122,4 +123,3 @@ def typesafe_credential_status() -> str:
         return "TypeSafe key registered." if stored_typesafe_api_key() else "No TypeSafe key registered."
     except LectureUtilError as error:
         return str(error)
-

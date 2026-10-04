@@ -80,6 +80,20 @@ uv run lecture-util doctor
 
 OpenAI API 전사는 GPU나 로컬 Whisper 모델을 실행하지 않습니다. `uv sync`는 기존 플랫폼별 로컬 전사 의존성도 설치합니다. API 키를 설정 화면에 저장하려면 macOS Keychain 또는 Linux의 실행 중인 Secret Service가 필요합니다. 보안 저장소가 없는 서버에서는 `OPENAI_API_KEY` 환경변수를 사용할 수 있습니다. `doctor`는 저장된 플랫폼에 맞춰 SDK·키 또는 로컬 전사 환경을 점검하며, 실제 API 요청은 보내지 않습니다.
 
+### WSL
+
+WSL에서도 Linux 설치 절차를 사용합니다. Secret Service가 없는 환경에서도 로컬 전사와 수동 과목 선택은 API 키 없이 사용할 수 있습니다. OpenAI API 전사나 TypeSafe 자동 과목 분류를 사용할 때는 WSL 셸에서 필요한 키만 환경변수로 설정하세요.
+
+```bash
+export OPENAI_API_KEY="your-openai-api-key"  # OpenAI API 전사 사용 시
+export TYPESAFE_API_KEY="your-typesafe-api-key"  # 자동 과목 분류 사용 시
+uv run lecture-util doctor
+```
+
+환경변수로 키를 설정했다면 온보딩·`config`의 API 키 입력창은 비워 두세요. 설정 화면에서 키를 저장하거나 삭제하는 기능은 실행 중인 Secret Service가 필요합니다. 평문 파일로 자동 대체 저장하지 않습니다.
+
+`doctor`는 보안 저장소를 사용할 수 없어도 TypeSafe 진단 결과와 환경변수 안내를 표시하고 나머지 점검을 계속합니다. 선택 기능인 TypeSafe 키가 없거나 다른 점검이 실패하면 종료 코드는 `1`이며, 수동 과목 선택을 막지는 않습니다. GPU가 없는 WSL에서는 로컬 전사 장치를 `CPU`로 선택하거나 `--device cpu`를 지정하세요.
+
 ## 온보딩과 Vault 준비
 
 처음 인자 없이 실행하면 강의 입력 화면보다 먼저 온보딩 화면이 열립니다. 다음 기본값을 설정합니다.
@@ -267,7 +281,7 @@ uv run lecture-util run URL \
 #### OpenAI API 전사
 
 1. `uv run lecture-util config`에서 `OpenAI API`와 모델을 선택합니다.
-2. API 키를 마스킹 입력창에 입력하고 저장합니다. 키는 macOS Keychain 또는 Linux Secret Service에 보관되며 설정 JSON·실행 요청·로그에는 포함되지 않습니다.
+2. API 키를 마스킹 입력창에 입력하고 저장합니다. 키는 macOS Keychain 또는 Linux Secret Service에 보관되며 설정 JSON·실행 요청·로그에는 포함되지 않습니다. WSL 등 보안 저장소가 없는 환경에서는 `OPENAI_API_KEY` 환경변수를 설정하고 키 입력창을 비워 둡니다.
 3. 다음 실행부터 저장된 플랫폼·모델을 사용합니다. 강의 오디오가 OpenAI로 전송되며 API 이용료는 별도 과금됩니다.
 
 기존 키는 화면에 재표시하지 않습니다. 빈 입력은 저장된 키를 유지하고, 새 값을 입력하면 교체합니다. 삭제 체크박스는 저장할 때만 적용되며 취소하면 키를 변경하지 않습니다. 보안 저장소 오류가 나면 입력을 유지한 채 오류를 표시하고 평문 파일로 대체 저장하지 않습니다. 환경변수 `OPENAI_API_KEY`가 있으면 저장된 키보다 우선하며, 저장된 키를 삭제해도 환경변수는 유지됩니다.
