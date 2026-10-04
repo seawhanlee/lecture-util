@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import platform
+import shutil
+import tempfile
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -15,7 +17,7 @@ from lecture_util.media import download_hls, extract_audio, resolve_source, tool
 from lecture_util.models import LecturePaths, LectureSource, RunOptions, Transcript, TranscriptionOptions
 from lecture_util.progress import ProgressCallback, format_duration, format_size, report
 from lecture_util.recovery import resume_message, save_request
-from lecture_util.state import RunState, create_workspace, lecture_id, workspace_lock
+from lecture_util.state import RunState, create_workspace, file_digest, lecture_id, workspace_lock
 from lecture_util.summarizers import CodexSummarizer, Summarizer
 from lecture_util.summary import DEFAULT_PROMPT, summary_stage
 from lecture_util.transcription import preflight_transcription, save_transcript, transcribe_audio
@@ -390,12 +392,41 @@ def preflight_preparation(paths: LecturePaths, state: RunState,
         require_executable("ffmpeg")
 
 
-def finalize_lecture_video(source_path: Path, target_path: Path) -> None:
+def finalize_lecture_video(
+    source_path: Path, target_path: Path, *, force: bool = False,
+) -> None:
     if source_path.resolve() == target_path.resolve():
         return
+    if target_path.exists():
+        # Older cross-filesystem moves could copy all bytes and then fail
+        # copying POSIX metadata. Only recover an identical video.
+        if target_path.is_file() and file_digest(source_path) == file_digest(target_path):
+            source_path.unlink()
+            return
+        if not force:
+            raise LectureUtilError(
+                f"Video file already exists. Use --force to replace it: {target_path}"
+            )
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    import shutil
-    shutil.move(str(source_path), str(target_path))
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=target_path.parent, prefix=f".{target_path.name}.",
+            suffix=".transfer", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+        # NAS/WSL shares may accept file contents but reject chmod/utime.
+        # Copy bytes only, and expose the final path after a complete copy.
+        shutil.copyfile(source_path, temporary)
+        temporary.replace(target_path)
+        source_path.unlink()
+    except OSError as error:
+        raise LectureUtilError(
+            f"Could not store video {source_path} at {target_path}: {error}"
+        ) from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def preflight_run(options: RunOptions, vault_root: Path, video_root: Path) -> None:
@@ -585,8 +616,12 @@ def _execute_run_locked(
                     semester_start=semester_start,
                 )
                 if source.kind == "hls" and paths.video.is_file():
-                    finalize_lecture_video(paths.video, video)
+                    finalize_lecture_video(paths.video, video, force=options.force)
                     paths.video = video
+                    video_state = RunState(LecturePaths(journal.parent))
+                    video_state.complete_stage(
+                        "download", output=str(video), sha256=video_state.digest(video),
+                    )
                 RunState(LecturePaths(journal.parent), read_only=True)
                 save_request(
                     journal.parent,

@@ -323,4 +323,96 @@ def test_execute_run_with_auto_course_classification(tmp_path):
     mock_publish.assert_called_once()
     published_course = mock_publish.call_args.kwargs["course"]
     assert published_course.name == "OperatingSystems"
+    from lecture_util.state import RunState, lecture_id
+    state = RunState(LecturePaths(cache / f"lecture-{lecture_id(options.url)}"), read_only=True)
+    video = videos / "OperatingSystems" / "2주차" / "페이징 기법.mp4"
+    assert state.data["stages"]["download"]["output"] == str(video)
+    assert state.data["stages"]["download"]["sha256"] == file_digest(video)
+    assert not cached.root.joinpath("source.mp4").exists()
+    restored_paths = LecturePaths(state.paths.root, video_path=video)
+    with patch("lecture_util.pipeline.download_hls") as download:
+        download_stage(restored_paths, state)
+    download.assert_not_called()
 
+
+
+def test_finalize_video_does_not_copy_posix_metadata(tmp_path):
+    from lecture_util.pipeline import finalize_lecture_video
+
+    source = tmp_path / "cache" / "source.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"downloaded-video")
+    target = tmp_path / "nas" / "Course" / "5-1.mp4"
+    with patch("shutil.copystat", side_effect=PermissionError(1, "Operation not permitted")) as metadata:
+        finalize_lecture_video(source, target)
+    metadata.assert_not_called()
+    assert target.read_bytes() == b"downloaded-video"
+    assert not source.exists()
+    assert list(target.parent.iterdir()) == [target]
+
+
+def test_finalize_video_preserves_source_and_cleans_failed_copy(tmp_path):
+    import pytest
+    from lecture_util.pipeline import finalize_lecture_video
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"complete-video")
+    target = tmp_path / "nas" / "5-1.mp4"
+
+    def fail_copy(source, destination):
+        destination.write_bytes(b"partial")
+        raise OSError("disk full")
+
+    with patch("shutil.copyfile", side_effect=fail_copy):
+        with pytest.raises(LectureUtilError, match="Could not store video.*disk full"):
+            finalize_lecture_video(source, target)
+    assert source.read_bytes() == b"complete-video"
+    assert not target.exists()
+    assert not list(target.parent.iterdir())
+
+
+def test_finalize_video_recovers_identical_copy_from_previous_failure(tmp_path):
+    from lecture_util.pipeline import finalize_lecture_video
+
+    source = tmp_path / "source.mp4"
+    target = tmp_path / "target.mp4"
+    source.write_bytes(b"complete-video")
+    target.write_bytes(source.read_bytes())
+    with patch("shutil.copyfile") as copy:
+        finalize_lecture_video(source, target)
+    copy.assert_not_called()
+    assert target.read_bytes() == b"complete-video"
+    assert not source.exists()
+
+
+def test_finalize_video_preserves_conflicting_target_unless_forced(tmp_path):
+    import pytest
+    from lecture_util.pipeline import finalize_lecture_video
+
+    source = tmp_path / "source.mp4"
+    target = tmp_path / "target.mp4"
+    source.write_bytes(b"downloaded-video")
+    target.write_bytes(b"user-video")
+    with pytest.raises(LectureUtilError, match="--force"):
+        finalize_lecture_video(source, target)
+    assert source.read_bytes() == b"downloaded-video"
+    assert target.read_bytes() == b"user-video"
+    finalize_lecture_video(source, target, force=True)
+    assert target.read_bytes() == b"downloaded-video"
+    assert not source.exists()
+
+
+def test_finalize_video_failed_forced_copy_preserves_existing_target(tmp_path):
+    import pytest
+    from lecture_util.pipeline import finalize_lecture_video
+
+    source = tmp_path / "source.mp4"
+    target = tmp_path / "target.mp4"
+    source.write_bytes(b"downloaded-video")
+    target.write_bytes(b"user-video")
+    with patch("shutil.copyfile", side_effect=OSError("disk full")):
+        with pytest.raises(LectureUtilError, match="disk full"):
+            finalize_lecture_video(source, target, force=True)
+    assert source.read_bytes() == b"downloaded-video"
+    assert target.read_bytes() == b"user-video"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["source.mp4", "target.mp4"]
