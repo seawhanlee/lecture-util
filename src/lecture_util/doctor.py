@@ -25,17 +25,23 @@ def run_checks() -> list[Check]:
     from lecture_util.credentials import resolve_typesafe_api_key
     try:
         typesafe_key = resolve_typesafe_api_key(required=False)
-    except LectureUtilError as error:
+    except LectureUtilError:
         checks.append(Check(
             "TypeSafe Jev", False,
-            f"{error} Set TYPESAFE_API_KEY for auto-classification "
-            "or select a course manually (optional).",
+            "Could not read the TypeSafe API key from OS credential storage. "
+            "Set TYPESAFE_API_KEY to enable automatic course classification. "
+            "This is optional when selecting a course manually.",
         ))
     else:
         if typesafe_key:
             checks.append(Check("TypeSafe Jev", True, "API key configured for auto-classification"))
         else:
-            checks.append(Check("TypeSafe Jev", False, "TYPESAFE_API_KEY not set (optional; required for auto course classification)"))
+            checks.append(Check(
+                "TypeSafe Jev", False,
+                "TypeSafe API key not configured. Set TYPESAFE_API_KEY "
+                "to enable automatic course classification. "
+                "This is optional when selecting a course manually.",
+            ))
 
     from lecture_util.configuration import load_config
     try:

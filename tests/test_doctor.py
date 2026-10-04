@@ -15,7 +15,9 @@ def unavailable_storage(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
         credentials, "_backend",
-        Mock(side_effect=LectureUtilError("OS credential storage is unavailable.")),
+        Mock(side_effect=LectureUtilError(
+            "OS credential storage is unavailable. Set OPENAI_API_KEY or TYPESAFE_API_KEY.",
+        )),
     )
     monkeypatch.setattr("lecture_util.configuration.load_config", lambda **kwargs: None)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: None if name == "nvidia-smi" else f"/bin/{name}")
@@ -29,6 +31,9 @@ def test_doctor_continues_local_checks_without_secret_service(unavailable_storag
     assert not checks["TypeSafe Jev"].ok
     assert "TYPESAFE_API_KEY" in checks["TypeSafe Jev"].detail
     assert "optional" in checks["TypeSafe Jev"].detail
+    assert "selecting a course manually" in checks["TypeSafe Jev"].detail
+    assert "OS credential storage" in checks["TypeSafe Jev"].detail
+    assert "OPENAI_API_KEY" not in checks["TypeSafe Jev"].detail
     assert checks["platform"].ok
     assert checks["faster-whisper"].ok
     assert "NVIDIA GPU" in checks
@@ -68,3 +73,17 @@ def test_doctor_uses_typesafe_environment_key_without_secret_service(unavailable
     monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     checks = {check.name: check for check in doctor.run_checks()}
     assert checks["TypeSafe Jev"].ok
+
+
+def test_doctor_explains_missing_typesafe_key(unavailable_storage, monkeypatch):
+    backend = Mock()
+    backend.get_password.return_value = None
+    monkeypatch.setattr(credentials, "_backend", lambda: backend)
+    checks = {check.name: check for check in doctor.run_checks()}
+    detail = checks["TypeSafe Jev"].detail
+    assert not checks["TypeSafe Jev"].ok
+    assert "not configured" in detail
+    assert "TYPESAFE_API_KEY" in detail
+    assert "automatic course classification" in detail
+    assert "optional when selecting a course manually" in detail
+    assert "OPENAI_API_KEY" not in detail
