@@ -53,18 +53,42 @@ N주차/
 
 Codex 로그인을 포함한 Codex 자체 설정은 먼저 완료되어 있어야 합니다. 모델을 별도로 지정하지 않으면 Codex CLI에 설정된 기본 모델을 사용합니다.
 
-### wheel로 CLI 설치
+### wheel(`.whl`)로 CLI 설치
 
-[GitHub Releases](https://github.com/seawhanlee/lecture-util/releases)에서 `.whl`을 내려받아 독립 CLI로 설치할 수 있습니다.
+`.whl`은 Python 패키지 배포 파일입니다. 저장소를 clone하거나 `uv sync`를 실행하지 않고도 `lecture-util`을 독립 CLI로 설치할 수 있습니다.
+
+배포 버전은 [GitHub Releases](https://github.com/seawhanlee/lecture-util/releases)의 **Assets**에서 `lecture_util-버전-py3-none-any.whl` 파일을 내려받습니다. 아직 Release가 없는 버전은 [GitHub Actions](https://github.com/seawhanlee/lecture-util/actions/workflows/build.yml)의 성공한 `Build distributions` 실행에서 **Artifacts → lecture-util-dist**를 내려받아 ZIP을 풀면 wheel을 얻을 수 있습니다. `.tar.gz`는 소스 배포본이며 아래 설치에는 `.whl`을 사용합니다.
+
+다운로드한 파일이 있는 폴더에서 설치합니다. 아래 버전은 예시이므로 실제 파일명으로 바꾸세요.
 
 ```bash
-uv tool install ./lecture_util-0.3.5-py3-none-any.whl
+uv tool install --python 3.12 ./lecture_util-0.3.6-py3-none-any.whl
 lecture-util doctor
 lecture-util onboard
 lecture-util
 ```
 
-Python 패키지 의존성은 자동 설치됩니다. FFmpeg·ffprobe·yt-dlp·Codex CLI와 로컬 GPU 전사에 필요한 드라이버는 별도로 준비하세요. wheel 설치 후에는 이 문서의 `uv run lecture-util ...` 대신 `lecture-util ...`로 실행합니다. 새 wheel로 교체하려면 `uv tool install --force ./새버전.whl`을 사용합니다.
+`uv tool install`은 전용 가상환경에 Python 패키지 의존성을 자동 설치합니다. 설치 후에는 저장소 밖에서도 `lecture-util`을 실행할 수 있으며, 이 문서의 `uv run lecture-util ...` 대신 `lecture-util ...`로 실행합니다.
+
+FFmpeg·ffprobe·yt-dlp·로그인된 Codex CLI는 별도로 준비하세요. 로컬 GPU 전사에는 플랫폼에 맞는 장치와 드라이버도 필요합니다. `py3-none-any` wheel을 사용하더라도 전사 백엔드의 플랫폼 요구 사항은 그대로 적용됩니다. WSL에서는 WSL 셸 안에서 설치하고 실행하세요.
+
+설치 후 `lecture-util: command not found`가 나오면 다음 명령으로 실행 파일 경로를 셸에 추가하고 터미널을 다시 여세요. [uv 도구 설치 안내](https://docs.astral.sh/uv/guides/tools/#installing-tools)
+
+```bash
+uv tool update-shell
+```
+
+새 버전으로 업데이트할 때는 새 wheel을 내려받아 다시 설치합니다.
+
+```bash
+uv tool install --force --python 3.12 ./lecture_util-0.3.6-py3-none-any.whl
+```
+
+설치 방식이 바뀌어도 기존 설정·캐시·Vault·영상 보관소 경로를 사용합니다. CLI를 제거하려면 다음을 실행합니다. 저장한 설정과 강의 파일은 별도로 관리합니다.
+
+```bash
+uv tool uninstall lecture-util
+```
 
 ### Apple Silicon macOS
 
@@ -744,8 +768,8 @@ uv build
 
 ```bash
 git push origin master
-git tag v0.3.5
-git push origin v0.3.5
+git tag v0.3.6
+git push origin v0.3.6
 ```
 
 다음 릴리스에서는 태그를 새 패키지 버전으로 바꾸세요. GitHub의 기본 `GITHUB_TOKEN`을 사용하므로 별도 배포 토큰 설정은 필요하지 않습니다.
