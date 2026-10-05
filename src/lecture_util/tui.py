@@ -117,6 +117,12 @@ class LectureSetupApp(FormApp[RunOptions]):
             yield Label("Tags (comma-separated, optional)", classes="field-label")
             yield Input(placeholder="operating-systems, midterm", id="tags")
             yield Checkbox("Force every stage to run again", id="force")
+        with Collapsible(title="Lecture materials", collapsed=True):
+            yield Label("Registered PDF directories", classes="field-label")
+            yield Label("", id="registered-materials", markup=False)
+            yield Checkbox("Use lecture materials", value=True, id="use-materials")
+            yield Label("Additional PDF directories (one path per line)", classes="field-label")
+            yield TextArea(id="materials-dirs")
         with Collapsible(title="Transcription", collapsed=True):
             yield TranscriptionSettings(self.initial or self.config)
         with Collapsible(title="Summary", collapsed=True):
@@ -175,6 +181,15 @@ class LectureSetupApp(FormApp[RunOptions]):
             mode_select.value = "full"
         video_only = mode_select.value == "video"
         course_value = self._select_value("#course")
+        from lecture_util.materials import registered_directories
+        try:
+            registered = registered_directories(self.vault_root, course_value)
+            material_label = "\n".join(registered) or "No directories registered. Use lecture-util materials add."
+        except LectureUtilError as error:
+            material_label = str(error)
+        self.query_one("#registered-materials", Label).update(material_label)
+        self.query_one("#use-materials", Checkbox).disabled = video_only
+        self.query_one("#materials-dirs", TextArea).disabled = video_only
         course_label = course_value
         title = self.value("lecture-title") or "Untitled lecture"
         lecture_date = self.value("lecture-date") or "Choose a date"
@@ -222,6 +237,7 @@ class LectureSetupApp(FormApp[RunOptions]):
             f"SUMMARY\n{self.selected_model() or 'Codex default'}"
             f"\nThinking effort: {self.selected_effort() or 'Codex default'}"
             f"\n{prompt}\n\n{rerun}"
+            f"\n\nMATERIALS\n{'Enabled' if self.query_one('#use-materials', Checkbox).value else 'Transcript only'}"
         )
 
     def _submit(self) -> None:
@@ -239,6 +255,7 @@ class LectureSetupApp(FormApp[RunOptions]):
         self.run_worker(self._preflight(options), exclusive=True)
 
     async def _preflight(self, options: RunOptions) -> None:
+        run_button = self.query_one("#run", Button)
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lecture-preflight")
         try:
             await asyncio.get_running_loop().run_in_executor(
@@ -252,7 +269,7 @@ class LectureSetupApp(FormApp[RunOptions]):
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
             self.checking = False
-            self.query_one("#run", Button).disabled = False
+            run_button.disabled = False
 
     def _restore_input(self, options: RunOptions) -> None:
         for field, value in {
@@ -271,6 +288,8 @@ class LectureSetupApp(FormApp[RunOptions]):
         self.query_one("#force", Checkbox).value = options.force
         self.query_one("#prompt-mode", Select).value = "inline"
         self.query_one("#inline-prompt", TextArea).text = options.prompt
+        self.query_one("#materials-dirs", TextArea).text = "\n".join(options.materials_dirs)
+        self.query_one("#use-materials", Checkbox).value = not options.no_materials
 
     def _build_options(self) -> RunOptions:
         self.error_field = "source"
@@ -335,7 +354,13 @@ class LectureSetupApp(FormApp[RunOptions]):
         transcription = self.query_one(TranscriptionSettings).values()
         raw_tags = self.query_one("#tags", Input).value.strip()
         llm_model = self.selected_model()
-        return RunOptions(
+        self.error_field = "materials-dirs"
+        materials_dirs = [str(Path(line.strip()).expanduser().resolve())
+                          for line in self.query_one("#materials-dirs", TextArea).text.splitlines() if line.strip()]
+        no_materials = not self.query_one("#use-materials", Checkbox).value
+        if no_materials and materials_dirs:
+            raise LectureUtilError("Clear additional directories to use the transcript only.")
+        options = RunOptions(
             url=source.location,
             source=source,
             course=course_name,
@@ -348,7 +373,16 @@ class LectureSetupApp(FormApp[RunOptions]):
             **transcription,
             prompt=prompt,
             force=self.query_one("#force", Checkbox).value,
+            materials_dirs=materials_dirs,
+            no_materials=no_materials,
         )
+        if (self.initial and self.initial.course == course_name
+                and self.initial.materials_dirs == materials_dirs
+                and self.initial.no_materials == no_materials):
+            options.materials_files = self.initial.materials_files
+        from lecture_util.materials import resolve_run_materials
+        resolve_run_materials(options, self.vault_root)
+        return options
 
 
 def run_tui(config: AppConfig | None = None, *, initial: RunOptions | None = None) -> RunOptions | None:

@@ -18,6 +18,8 @@ dependencies = [
     "nvidia-cublas-cu12>=12; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cudnn-cu12>=9; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "textual>=8.2.8",
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
 ]
 
 [dependency-groups]

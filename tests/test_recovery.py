@@ -31,7 +31,7 @@ def test_resume_uses_snapshot_without_loading_current_config(tmp_path):
           patch('lecture_util.cli._execute_run') as execute):
         result = CliRunner().invoke(app, ['resume', str(root)])
     assert result.exit_code == 0, result.output
-    assert execute.call_args.args[0] == options
+    assert execute.call_args.args[0] == replace(options, materials_files=[])
 
 
 def test_legacy_workspace_has_actionable_resume_error(tmp_path):
@@ -94,7 +94,7 @@ def test_local_resume_restores_source_and_rejects_changed_content(tmp_path):
     save_request(root, options, tmp_path / "vault", tmp_path / "videos")
     with patch("lecture_util.recovery.resolve_source", return_value=source):
         restored, _, _ = load_request(root)
-    assert restored == options
+    assert restored == replace(options, materials_files=[])
     changed = replace(source, content_hash="changed-hash")
     with patch("lecture_util.recovery.resolve_source", return_value=changed):
         with pytest.raises(LectureUtilError, match="workspace does not match"):

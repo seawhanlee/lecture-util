@@ -100,6 +100,9 @@ class RunOptions:
     video_only: bool = False
     transcription_provider: str = "local"
     openai_transcription_model: str = "gpt-4o-transcribe"
+    materials_dirs: list[str] = field(default_factory=list)
+    no_materials: bool = False
+    materials_files: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

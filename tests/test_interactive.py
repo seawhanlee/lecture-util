@@ -28,7 +28,7 @@ def setup(tmp_path, monkeypatch):
 
 def test_url_shortcut_prompts_and_preserves_query_string(setup):
     config, execute = setup
-    result = CliRunner().invoke(app, [URL], input="\n2\n2\n\nLecture [intro]\ny\n")
+    result = CliRunner().invoke(app, [URL], input="\n2\n2\n\nLecture [intro]\ny\n\ny\n")
     assert result.exit_code == 0, result.output
     selected = execute.call_args.args[0]
     assert selected.url == URL
@@ -52,7 +52,7 @@ def test_invalid_metadata_and_conflicting_note_allow_correction(setup):
     existing.write_text("Original")
     result = CliRunner().invoke(
         app, [URL],
-        input="\n99\n1\n0\n2\nwrong\n2026-09-01\n\n../bad\nExisting\nNew\ny\n",
+        input="\n99\n1\n0\n2\nwrong\n2026-09-01\n\n../bad\nExisting\nNew\ny\n\ny\n",
     )
     assert result.exit_code == 0, result.output
     assert execute.call_args.args[0].title == "New"
@@ -62,7 +62,7 @@ def test_invalid_metadata_and_conflicting_note_allow_correction(setup):
     assert existing.read_text() == "Original"
 
 
-@pytest.mark.parametrize("input_text", ["\n1\n2\n\nLecture\nn\n", ""])
+@pytest.mark.parametrize("input_text", ["\n1\n2\n\nLecture\nn\nn\n", ""])
 def test_cancel_or_eof_never_starts_processing(setup, input_text):
     _, execute = setup
     result = CliRunner().invoke(app, [URL], input=input_text)
@@ -95,7 +95,7 @@ def test_first_run_onboards_before_rich_prompts(setup, monkeypatch):
     save = Mock(return_value=config)
     monkeypatch.setattr("lecture_util.cli.run_onboarding", onboard)
     monkeypatch.setattr("lecture_util.cli.save_config", save)
-    result = CliRunner().invoke(app, [URL], input="\n1\n1\n\nLecture\ny\n")
+    result = CliRunner().invoke(app, [URL], input="\n1\n1\n\nLecture\ny\n\ny\n")
     assert result.exit_code == 0, result.output
     onboard.assert_called_once()
     save.assert_called_once_with(config)
@@ -109,3 +109,17 @@ def test_video_mode_skips_note_preview(setup):
     assert execute.call_args.args[0].video_only is True
     assert "Thinking effort" not in result.output
     assert "Video" in result.output
+
+
+def test_rich_material_directory_errors_allow_correction(setup, tmp_path):
+    from PIL import Image
+    _, execute = setup
+    directory = tmp_path / "PDF 자료"
+    directory.mkdir()
+    Image.new("RGB", (20, 20), "white").save(directory / "slide.pdf", "PDF")
+    inputs = f"\n1\n1\n\nLecture\ny\n/missing-materials\n{directory}\n\ny\n"
+    result = CliRunner().invoke(app, [URL], input=inputs)
+    assert result.exit_code == 0, result.output
+    assert "does not exist" in result.output
+    assert execute.call_args.args[0].materials_dirs == [str(directory)]
+    assert not execute.call_args.args[0].no_materials

@@ -78,6 +78,51 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 console = Console()
+materials_app = typer.Typer(help="Register and inspect course PDF directories.")
+app.add_typer(materials_app, name="materials")
+
+
+@materials_app.command("add")
+def materials_add(
+    directory: Path = typer.Argument(..., file_okay=False),
+    course: str = typer.Option(..., "--course"),
+) -> None:
+    """Register a PDF directory for a course without moving originals."""
+    def action() -> None:
+        from lecture_util.materials import register_directory
+        config = load_config(required=True)
+        assert config is not None
+        register_directory(config.vault_root, course, directory)
+        console.print(Text(f"Registered materials: {directory.expanduser().resolve()}"), soft_wrap=True)
+    _run_or_exit(action)
+
+
+@materials_app.command("list")
+def materials_list(course: str = typer.Option(..., "--course")) -> None:
+    """List directories registered for a course."""
+    def action() -> None:
+        from lecture_util.materials import registered_directories
+        config = load_config(required=True)
+        assert config is not None
+        resolve_course(course, config.vault_root)
+        directories = registered_directories(config.vault_root, course)
+        console.print(Text("\n".join(directories) or "No material directories registered."), soft_wrap=True)
+    _run_or_exit(action)
+
+
+@materials_app.command("remove")
+def materials_remove(
+    directory: Path = typer.Argument(..., file_okay=False),
+    course: str = typer.Option(..., "--course"),
+) -> None:
+    """Unregister a directory; keep its PDFs and analysis caches."""
+    def action() -> None:
+        from lecture_util.materials import register_directory
+        config = load_config(required=True)
+        assert config is not None
+        register_directory(config.vault_root, course, directory, remove=True)
+        console.print(Text(f"Unregistered materials: {directory.expanduser().resolve()}"), soft_wrap=True)
+    _run_or_exit(action)
 
 
 def _run_or_exit(action: Callable[[], None]) -> None:
@@ -128,6 +173,8 @@ def _execute_run(
     video_root: Path | None = None, cache_root: Path | None = None,
 ) -> None:
     if options.video_only:
+        from lecture_util.materials import resolve_run_materials
+        resolve_run_materials(options, vault_root)
         if not options.course:
             raise LectureUtilError("An explicit --course is required.")
         _execute_download(
@@ -301,6 +348,8 @@ def run_command(
     beam_size: str | None = typer.Option(None, "--beam-size", help="Positive integer or default to reset the saved value"),
     force: bool = typer.Option(False, "--force"),
     video_only: bool = typer.Option(False, "--video-only", help="Download video without audio extraction or notes"),
+    materials_dir: list[Path] | None = typer.Option(None, "--materials-dir", help="Additional PDF directory (repeatable)"),
+    no_materials: bool = typer.Option(False, "--no-materials", help="Use the transcript only"),
 ) -> None:
     """Process a URL or local media file and publish one lecture to the Obsidian vault."""
 
@@ -308,6 +357,10 @@ def run_command(
         config = (load_config(required=True, video_only=True)
                   if video_only else load_config(required=True))
         assert config is not None
+        if no_materials and materials_dir:
+            raise LectureUtilError("--no-materials cannot be combined with --materials-dir.")
+        if video_only and (materials_dir or no_materials):
+            raise LectureUtilError("Video-only mode cannot use material options.")
         provider = transcription_provider if transcription_provider is not None else config.transcription_provider
         if not video_only:
             validate_provider_overrides(provider, whisper_model, device, compute_type, batch_size, beam_size,
@@ -330,6 +383,8 @@ def run_command(
                 url=validated_url,
                 source=source,
                 video_only=video_only,
+                materials_dirs=[str(path.expanduser().resolve()) for path in materials_dir or []],
+                no_materials=no_materials,
                 course=selected_course,
                 lecture_date=lecture_date,
                 semester_start=semester_start or config.semester_start,
@@ -483,11 +538,22 @@ def summarize_command(
     prompt: str | None = typer.Option(None, "--prompt"),
     prompt_file: Path | None = typer.Option(None, "--prompt-file", exists=True, dir_okay=False),
     force: bool = typer.Option(False, "--force"),
+    course: str | None = typer.Option(None, "--course", help="Use this course's registered PDF directories"),
+    materials_dir: list[Path] | None = typer.Option(None, "--materials-dir", help="Additional PDF directory (repeatable)"),
+    no_materials: bool = typer.Option(False, "--no-materials", help="Use the transcript only"),
 ) -> None:
     """Summarize an existing transcript."""
 
     def action() -> None:
         config = load_config(validate_vault=False) or default_app_config()
+        from lecture_util.materials import discover_materials, registered_directories
+        if no_materials and materials_dir:
+            raise LectureUtilError("--no-materials cannot be combined with --materials-dir.")
+        directories = [str(path.expanduser().resolve()) for path in materials_dir or []]
+        if course and not no_materials:
+            resolve_course(course, config.vault_root)
+            directories = registered_directories(config.vault_root, course) + directories
+        files = [] if no_materials else discover_materials(directories)
         paths = LecturePaths(lecture_dir)
         with workspace_lock(lecture_dir):
             state = RunState(paths)
@@ -498,7 +564,8 @@ def summarize_command(
             )
             transcript = load_transcript(paths.transcript_json)
             restore_transcript_files(transcript, paths.transcript_markdown, paths.transcript_srt)
-            with ConsoleProgressReporter(("summary",), console=console) as progress:
+            stages = ("materials", "summary") if files else ("summary",)
+            with ConsoleProgressReporter(stages, console=console) as progress:
                 summary_stage(
                     transcript,
                     paths.transcript_markdown,
@@ -508,6 +575,7 @@ def summarize_command(
                     prompt=resolve_prompt(prompt, prompt_file),
                     force=force,
                     progress=progress,
+                    materials_files=files,
                 )
             console.print(f"[green]Summarized[/green] {paths.summary}")
 
@@ -555,6 +623,8 @@ def _execute_cache_list(cache_root: Path | None = None) -> None:
         lectures = scan_cached_lectures(root)
         summary = get_storage_summary(root, video_root)
 
+        if summary.materials_cache_size:
+            console.print(f"Shared PDF analysis cache: {format_size(summary.materials_cache_size)}")
         if not lectures:
             console.print(f"[dim]No cached lectures found in {root}[/dim]")
             if summary.video_root and summary.video_root.is_dir():
@@ -736,4 +806,3 @@ def cache_prune_command(
 
 
 app.add_typer(cache_app, name="cache")
-

@@ -21,6 +21,9 @@ def run_checks() -> list[Check]:
     for executable in ("yt-dlp", "ffmpeg", "ffprobe", "codex"):
         path = shutil.which(executable)
         checks.append(Check(executable, path is not None, path or "not found on PATH"))
+    pdf_available = all(importlib.util.find_spec(name) is not None for name in ("pypdfium2", "PIL"))
+    checks.append(Check("PDF reading", pdf_available,
+                        "on-demand page rendering installed" if pdf_available else "run: uv sync"))
 
     from lecture_util.configuration import load_config
     try:

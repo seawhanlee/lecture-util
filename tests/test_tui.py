@@ -525,3 +525,51 @@ class RecoveryFormTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 restored = app._build_options()
                 assert restored.course == COURSE
+
+
+class MaterialsFormTests(unittest.IsolatedAsyncioTestCase):
+    async def test_material_input_error_preserves_paths_and_title(self):
+        from textual.widgets import Checkbox, TextArea
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            app = configured_app(root)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one('#source', Input).value = URL
+                app.query_one('#lecture-title', Input).value = 'Saved title'
+                app.query_one('#lecture-date', Input).value = '2026-09-07'
+                app.query_one('#materials-dirs', TextArea).text = str(root / 'missing')
+                await pilot.press('ctrl+r')
+                await pilot.pause()
+                assert app.is_running
+                assert app.query_one('#lecture-title', Input).value == 'Saved title'
+                assert app.query_one('#materials-dirs', TextArea).text == str(root / 'missing')
+                assert 'does not exist' in str(app.query_one('#error', Label).render())
+                app.query_one('#materials-dirs', TextArea).text = ''
+                app.query_one('#use-materials', Checkbox).value = False
+                assert app._build_options().no_materials
+
+    async def test_restores_material_inputs_and_frozen_snapshot(self):
+        from textual.widgets import TextArea
+        from PIL import Image
+        from lecture_util.materials import discover_materials, register_directory
+        from lecture_util.models import RunOptions
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            create_vault(root)
+            pdfs = root / 'PDF 자료'
+            pdfs.mkdir()
+            Image.new('RGB', (20, 20), 'white').save(pdfs / 'slide.pdf', 'PDF')
+            config = configured_app(root).config
+            register_directory(root, COURSE, pdfs)
+            initial = RunOptions(URL, COURSE, '2026-09-07', 'Saved', 'gpt-test', None,
+                                 'turbo', 'ko', 'cpu', 'Prompt', False, '2026-08-31',
+                                 materials_dirs=[str(pdfs)], materials_files=discover_materials([str(pdfs)]))
+            from lecture_util.media import resolve_source
+            initial.source = resolve_source(URL)
+            app = LectureSetupApp(config=config, initial=initial)
+            async with app.run_test(size=(100, 40)) as pilot:
+                await pilot.pause()
+                assert app.query_one('#materials-dirs', TextArea).text == str(pdfs)
+                assert str(pdfs) in str(app.query_one('#registered-materials', Label).render())
+                assert app._build_options() == initial

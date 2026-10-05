@@ -50,7 +50,10 @@ def test_doctor_checks_openai_without_secret_service(unavailable_storage, monkey
     monkeypatch.setattr("lecture_util.configuration.load_config", lambda **kwargs: config)
     # Exercise credential lookup without making requests or loading local models.
     monkeypatch.setattr("lecture_util.api_transcription.preflight_openai", credentials.resolve_api_key)
-    local_probe = Mock(side_effect=AssertionError("must not load local models"))
+    def pdf_spec_only(name):
+        assert name in {"pypdfium2", "PIL"}, "must not load local models"
+        return object()
+    local_probe = Mock(side_effect=pdf_spec_only)
     monkeypatch.setattr(doctor.importlib.util, "find_spec", local_probe)
     if has_openai_key:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -60,6 +63,4 @@ def test_doctor_checks_openai_without_secret_service(unavailable_storage, monkey
         assert checks["OpenAI transcription"].ok
     else:
         assert not checks["Transcription configuration"].ok
-    local_probe.assert_not_called()
-
-
+    assert all(call.args[0] in {"pypdfium2", "PIL"} for call in local_probe.call_args_list)

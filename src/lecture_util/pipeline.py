@@ -320,6 +320,7 @@ def run_lecture(
     prompt: str = DEFAULT_PROMPT,
     force: bool = False,
     progress: ProgressCallback | None = None,
+    materials_files: list[dict] | None = None,
 ) -> LecturePaths:
     from lecture_util.media import require_executable
     source = source or resolve_source(url)
@@ -328,7 +329,8 @@ def run_lecture(
     options = TranscriptionOptions(model, language, device, compute_type, batch_size, beam_size,
                                    transcription_provider, openai_transcription_model)
     prepared = cached_preparation(preview, preview_state, options, force=force)[2]
-    if summarizer.name == "codex" and (not prepared or not summary_cached(preview, preview_state, summarizer, prompt)):
+    if summarizer.name == "codex" and (not prepared or not summary_cached(
+            preview, preview_state, summarizer, prompt, materials_files=materials_files)):
         require_executable("codex")
     paths, state, transcript = prepare_lecture(
         url,
@@ -358,6 +360,8 @@ def run_lecture(
         prompt=prompt,
         force=force,
         progress=progress,
+        materials_files=materials_files,
+        materials_cache_root=output_dir,
     )
     return paths
 
@@ -445,15 +449,20 @@ def preflight_run(options: RunOptions, vault_root: Path, video_root: Path) -> No
     if _publication_record(paths.root / "publication.json").get("status") == "pending":
         return
     if options.video_only:
+        from lecture_util.materials import resolve_run_materials
+        resolve_run_materials(options, vault_root)
         require_executable("yt-dlp")
         require_executable("ffmpeg")
         return
     state = RunState(paths, read_only=True)
+    from lecture_util.materials import resolve_run_materials
+    options = resolve_run_materials(options, vault_root)
     state.data["source"] = {"kind": source.kind, "location": source.location}
     preflight_preparation(paths, state, transcription_options(options), force=options.force)
     prepared = cached_preparation(paths, state, transcription_options(options), force=options.force)[2]
     if not prepared or not summary_cached(paths, state, CodexSummarizer(
-            model=options.llm_model, reasoning_effort=options.reasoning_effort), options.prompt):
+            model=options.llm_model, reasoning_effort=options.reasoning_effort), options.prompt,
+            materials_files=options.materials_files):
         require_executable("codex")
 
 
@@ -522,10 +531,13 @@ def _execute_run_locked(
         semester_start=semester_start,
     )
     lecture_label = f"{course.name} · {lecture_date} {title}"
+    from lecture_util.materials import resolve_run_materials
+    options = resolve_run_materials(options, vault_root)
+    material_stages = ("materials",) if options.materials_files else ()
     stage_names = (
-        ("download", "audio", "transcription", "summary", "publication")
+        ("download", "audio", "transcription") + material_stages + ("summary", "publication")
         if source.kind == "hls"
-        else ("audio", "transcription", "summary", "publication")
+        else ("audio", "transcription") + material_stages + ("summary", "publication")
     )
     summarizer = CodexSummarizer(
         model=options.llm_model, reasoning_effort=options.reasoning_effort,
@@ -569,6 +581,7 @@ def _execute_run_locked(
                 prompt=options.prompt,
                 force=options.force,
                 progress=progress,
+                materials_files=options.materials_files,
             )
             summary_text = paths.summary.read_text(encoding="utf-8")
             transcript_text = paths.transcript_markdown.read_text(encoding="utf-8")
@@ -607,7 +620,8 @@ def _execute_run_locked(
     console.print(Text(label), highlight=False, soft_wrap=True)
 
 
-def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer, prompt: str) -> bool:
+def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer, prompt: str,
+                   *, materials_files: list[dict] | None = None) -> bool:
     from lecture_util.summary import summary_fingerprint
     from lecture_util.transcription import load_transcript
     stage = state.data.get("stages", {}).get("summary", {})
@@ -618,8 +632,18 @@ def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer,
         transcript = load_transcript(paths.transcript_json)
     except LectureUtilError:
         return False
+    material_stage = state.data.get("stages", {}).get("materials", {})
+    if materials_files:
+        from lecture_util.materials import material_identity, validate_snapshot
+        validate_snapshot(materials_files)
+        if (material_stage.get("status") != "complete"
+                or material_stage.get("fingerprint") != material_identity(
+                    materials_files, paths.transcript_markdown, summarizer)):
+            return False
     return (stage.get("fingerprint") == summary_fingerprint(
         transcript, paths.transcript_markdown, summarizer, prompt,
+        materials_files=materials_files,
+        materials_fingerprint=material_stage.get("context_fingerprint") if materials_files else None,
     ) and stage.get("sha256") == state.digest(paths.summary))
 
 

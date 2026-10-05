@@ -22,7 +22,8 @@ def transcription_options(options: RunOptions) -> TranscriptionOptions:
 
 def save_request(root: Path, options: RunOptions, vault: Path, videos: Path) -> None:
     atomic_write_json(root / 'request.json', {
-        'version': 1, 'options': asdict(replace(options, force=False)),
+        'version': 2, 'options': asdict(replace(options, force=False,
+                                            materials_files=options.materials_files or [])),
         'vault_root': str(vault.resolve()), 'video_root': str(videos.resolve()),
     })
 
@@ -31,7 +32,7 @@ def load_request(root: Path) -> tuple[RunOptions, Path, Path]:
     path = root / 'request.json'
     try:
         data: dict[str, Any] = json.loads(path.read_text(encoding='utf-8'))
-        if data.get('version') != 1:
+        if data.get('version') not in {1, 2}:
             raise ValueError('unsupported request version')
         options = RunOptions(**data['options'])
         for name in ('url', 'course', 'lecture_date', 'title', 'prompt', 'semester_start'):
@@ -39,6 +40,15 @@ def load_request(root: Path) -> tuple[RunOptions, Path, Path]:
                 raise ValueError(f'missing or invalid {name}')
         if not options.course:
             raise ValueError("course is required; start a new run with --course")
+        if (not isinstance(options.materials_dirs, list)
+                or any(not isinstance(p, str) or not p.strip() for p in options.materials_dirs)
+                or type(options.no_materials) is not bool):
+            raise ValueError("invalid material options")
+        if data['version'] == 1:
+            options = replace(options, materials_dirs=[], no_materials=False, materials_files=[])
+        else:
+            from lecture_util.materials import validate_snapshot
+            validate_snapshot(options.materials_files)
         source = resolve_source(options.url)
         options = replace(options, source=source if options.source is not None or source.kind != "hls" else None)
         validate_transcription_options(transcription_options(options))

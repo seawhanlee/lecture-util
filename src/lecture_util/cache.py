@@ -62,6 +62,7 @@ class StorageSummary:
     video_root: Path | None = None
     video_count: int = 0
     total_video_size: int = 0
+    materials_cache_size: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +210,8 @@ def get_storage_summary(
     lectures = scan_cached_lectures(root)
     total_lectures = len(lectures)
     published_lectures = sum(1 for item in lectures if item.is_published)
-    total_cache_size = sum(item.total_size for item in lectures)
+    materials_cache_size = get_directory_size(root / "materials")
+    total_cache_size = sum(item.total_size for item in lectures) + materials_cache_size
     total_audio_size = sum(item.audio_size for item in lectures)
 
     video_count = 0
@@ -236,6 +238,7 @@ def get_storage_summary(
         video_root=resolved_video_root,
         video_count=video_count,
         total_video_size=total_video_size,
+        materials_cache_size=materials_cache_size,
     )
 
 

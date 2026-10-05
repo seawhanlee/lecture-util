@@ -160,12 +160,12 @@ def test_resume_preserves_api_and_legacy_request(config, tmp_path):
     root = tmp_path / f"lecture-{lecture_id(options.url)}"
     save_request(root, replace(options, force=True), config.vault_root, config.video_root)
     restored, _, _ = load_request(root)
-    assert restored == options
+    assert restored == replace(options, materials_files=[])
     assert transcription_options(restored).selected_model == "gpt-4o-mini-transcribe"
     with patch("lecture_util.cli.load_config", side_effect=AssertionError("must not load defaults")), patch("lecture_util.cli._execute_run") as run:
         result = CliRunner().invoke(cli, ["resume", str(root)])
         assert result.exit_code == 0, result.output
-        assert run.call_args.args[0] == options
+        assert run.call_args.args[0] == replace(options, materials_files=[])
     data = json.loads((root / "request.json").read_text())
     del data["options"]["transcription_provider"]
     del data["options"]["openai_transcription_model"]
@@ -176,10 +176,13 @@ def test_resume_preserves_api_and_legacy_request(config, tmp_path):
 def test_doctor_and_preflight_skip_local_backends(config, monkeypatch):
     from lecture_util.doctor import run_checks
     from lecture_util.transcription import preflight_transcription
+    def pdf_spec_only(name):
+        assert name in {"pypdfium2", "PIL"}, "must not load local models"
+        return object()
     with (
         patch("lecture_util.configuration.load_config", return_value=config),
         patch("lecture_util.api_transcription.resolve_api_key", return_value="test"),
-        patch("lecture_util.doctor.importlib.util.find_spec", side_effect=AssertionError("must not load local models")),
+        patch("lecture_util.doctor.importlib.util.find_spec", side_effect=pdf_spec_only),
         patch("lecture_util.transcription.detect_device", side_effect=AssertionError("must not inspect GPU")),
     ):
         assert preflight_transcription(transcription_options(run_options(config))) == "openai"

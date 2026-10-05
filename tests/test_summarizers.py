@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import signal
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import pytest
 
 from lecture_util.summarizers import CodexSummarizer, _agent_prompt
 
@@ -70,3 +73,41 @@ class SummarizerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_material_json_uses_disposable_workspace_and_schema():
+    def start(argv, **kwargs):
+        output = Path(argv[argv.index("--output-last-message") + 1])
+        output.write_text('{"pages": []}', encoding="utf-8")
+        schema_path = Path(argv[argv.index("--output-schema") + 1])
+        assert schema_path.is_file()
+        return Mock(returncode=0, communicate=Mock(return_value=("", "")))
+
+    with (patch("lecture_util.summarizers._require_cli", return_value="codex"),
+          patch("lecture_util.summarizers.subprocess.Popen", side_effect=start) as run):
+        data = CodexSummarizer().generate_json("Read @/course/pdfs", {"type": "object"})
+    argv = run.call_args.args[0]
+    assert argv[argv.index("--sandbox") + 1] == "workspace-write"
+    assert "sandbox_workspace_write.exclude_slash_tmp=true" in argv
+    assert "sandbox_workspace_write.writable_roots=[]" in argv
+    assert not Path(argv[argv.index("--cd") + 1]).exists()
+    assert data == {"pages": []}
+
+
+def test_material_cancellation_terminates_codex_and_helper_group():
+    process = Mock(pid=1234)
+    process.communicate.side_effect = [KeyboardInterrupt(), ("", "")]
+    with (patch("lecture_util.summarizers._require_cli", return_value="codex"),
+          patch("lecture_util.summarizers.subprocess.Popen", return_value=process),
+          patch("lecture_util.summarizers.os.killpg") as kill):
+        with pytest.raises(KeyboardInterrupt):
+            CodexSummarizer().generate_json("Read PDFs", {})
+    kill.assert_called_once_with(1234, signal.SIGTERM)
+    assert process.communicate.call_count == 2
+
+
+def test_material_json_rejects_non_object_response():
+    from lecture_util.errors import LectureUtilError
+    with patch.object(CodexSummarizer, "_request", return_value="[]"):
+        with pytest.raises(LectureUtilError, match="invalid material JSON"):
+            CodexSummarizer().generate_json("Read PDFs", {})

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date, timedelta
+from pathlib import Path
 from typing import TypeVar
 
 from rich.console import Console
@@ -101,6 +102,26 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
         )
         if course is not None else None
     )
+    materials_dirs: list[str] = []
+    no_materials = False
+    if not video_only:
+        from lecture_util.materials import discover_materials, registered_directories
+        registered = registered_directories(config.vault_root, course.name)
+        console.print(Text("Registered materials: " + (", ".join(registered) or "none")))
+        no_materials = not Confirm.ask("Use lecture materials?", default=True, console=console)
+        if not no_materials:
+            while True:
+                directory = Prompt.ask("Additional PDF directory (blank to finish)", default="", console=console).strip()
+                if not directory:
+                    break
+                try:
+                    resolved = str(Path(directory).expanduser().resolve())
+                    discover_materials([resolved])
+                except LectureUtilError as error:
+                    console.print(Text(str(error), style="red"))
+                else:
+                    materials_dirs.append(resolved)
+            discover_materials(registered + materials_dirs)
     preview = Table(title="Lecture settings", show_header=False)
     for label, value in (
         ("Source", source.location),
@@ -129,4 +150,5 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
         whisper_model=config.whisper_model, language=config.language,
         compute_type=config.compute_type, batch_size=config.batch_size, beam_size=config.beam_size,
         device=config.device, prompt=DEFAULT_PROMPT, force=False,
+        materials_dirs=materials_dirs, no_materials=no_materials,
     )

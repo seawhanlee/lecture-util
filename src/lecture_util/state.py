@@ -158,7 +158,7 @@ class RunState:
         return self.data.get("stages", {}).get(name, {}).get("status") == "complete"
 
     def start_stage(self, name: str, **details: Any) -> None:
-        stages = ("download", "audio", "transcription", "summary")
+        stages = ("download", "audio", "transcription", "materials", "summary", "publication")
         if name in stages:
             for dependent in stages[stages.index(name) + 1:]:
                 if dependent in self.data["stages"]:
@@ -287,4 +287,3 @@ def clear_workspace_audio(root: Path) -> int:
                 freed += item.stat().st_size
                 item.unlink(missing_ok=True)
     return freed
-
