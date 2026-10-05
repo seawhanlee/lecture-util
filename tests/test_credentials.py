@@ -12,7 +12,6 @@ def backend(monkeypatch):
     backend.get_password.return_value = None
     monkeypatch.setattr(credentials, "_backend", lambda: backend)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     return backend
 
 
@@ -47,28 +46,15 @@ def test_missing_key_and_storage_failure(backend):
         credentials.resolve_api_key()
 
 
-@pytest.mark.parametrize("provider", ["openai", "typesafe"])
-def test_environment_key_without_os_storage(monkeypatch, provider):
+def test_environment_key_without_os_storage(monkeypatch):
     unavailable = Mock(side_effect=LectureUtilError("OS credential storage is unavailable"))
     monkeypatch.setattr(credentials, "_backend", unavailable)
-    variable = "OPENAI_API_KEY" if provider == "openai" else "TYPESAFE_API_KEY"
-    monkeypatch.setenv(variable, "  environment-key  ")
-    resolve = credentials.resolve_api_key if provider == "openai" else credentials.resolve_typesafe_api_key
-    assert resolve() == "environment-key"
+    monkeypatch.setenv("OPENAI_API_KEY", "  environment-key  ")
+    assert credentials.resolve_api_key() == "environment-key"
     unavailable.assert_not_called()
 
 
-def test_typesafe_missing_key_and_storage_failure(backend):
-    assert credentials.resolve_typesafe_api_key(required=False) is None
-    with pytest.raises(LectureUtilError, match="missing"):
-        credentials.resolve_typesafe_api_key()
-    backend.get_password.side_effect = RuntimeError("private-key")
-    with pytest.raises(LectureUtilError, match="Could not read") as error:
-        credentials.resolve_typesafe_api_key(required=False)
-    assert "private-key" not in str(error.value)
-
-
-def test_unavailable_secret_service_guides_both_providers(monkeypatch):
+def test_unavailable_secret_service_guides_openai(monkeypatch):
     from keyring.backends import SecretService
 
     monkeypatch.setattr(credentials.sys, "platform", "linux")
@@ -77,4 +63,3 @@ def test_unavailable_secret_service_guides_both_providers(monkeypatch):
         credentials._backend()
     assert "WSL" in str(error.value)
     assert "OPENAI_API_KEY" in str(error.value)
-    assert "TYPESAFE_API_KEY" in str(error.value)

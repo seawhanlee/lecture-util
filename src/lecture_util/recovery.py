@@ -37,6 +37,8 @@ def load_request(root: Path) -> tuple[RunOptions, Path, Path]:
         for name in ('url', 'course', 'lecture_date', 'title', 'prompt', 'semester_start'):
             if not isinstance(getattr(options, name), str):
                 raise ValueError(f'missing or invalid {name}')
+        if not options.course:
+            raise ValueError("course is required; start a new run with --course")
         source = resolve_source(options.url)
         options = replace(options, source=source if options.source is not None or source.kind != "hls" else None)
         validate_transcription_options(transcription_options(options))

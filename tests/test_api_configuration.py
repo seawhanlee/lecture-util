@@ -179,7 +179,6 @@ def test_doctor_and_preflight_skip_local_backends(config, monkeypatch):
     with (
         patch("lecture_util.configuration.load_config", return_value=config),
         patch("lecture_util.api_transcription.resolve_api_key", return_value="test"),
-        patch("lecture_util.credentials.resolve_typesafe_api_key", return_value="test"),
         patch("lecture_util.doctor.importlib.util.find_spec", side_effect=AssertionError("must not load local models")),
         patch("lecture_util.transcription.detect_device", side_effect=AssertionError("must not inspect GPU")),
     ):

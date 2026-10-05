@@ -11,12 +11,11 @@ from lecture_util.errors import LectureUtilError
 
 @pytest.fixture
 def unavailable_storage(monkeypatch):
-    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
         credentials, "_backend",
         Mock(side_effect=LectureUtilError(
-            "OS credential storage is unavailable. Set OPENAI_API_KEY or TYPESAFE_API_KEY.",
+            "OS credential storage is unavailable. Set OPENAI_API_KEY.",
         )),
     )
     monkeypatch.setattr("lecture_util.configuration.load_config", lambda **kwargs: None)
@@ -28,12 +27,7 @@ def unavailable_storage(monkeypatch):
 
 def test_doctor_continues_local_checks_without_secret_service(unavailable_storage):
     checks = {check.name: check for check in doctor.run_checks()}
-    assert not checks["TypeSafe Jev"].ok
-    assert "TYPESAFE_API_KEY" in checks["TypeSafe Jev"].detail
-    assert "optional" in checks["TypeSafe Jev"].detail
-    assert "selecting a course manually" in checks["TypeSafe Jev"].detail
-    assert "OS credential storage" in checks["TypeSafe Jev"].detail
-    assert "OPENAI_API_KEY" not in checks["TypeSafe Jev"].detail
+    assert "TypeSafe Jev" not in checks
     assert checks["platform"].ok
     assert checks["faster-whisper"].ok
     assert "NVIDIA GPU" in checks
@@ -42,7 +36,7 @@ def test_doctor_continues_local_checks_without_secret_service(unavailable_storag
 def test_doctor_cli_reports_storage_failure_without_traceback(unavailable_storage):
     result = CliRunner().invoke(app, ["doctor"])
     assert result.exit_code == 1
-    assert "TypeSafe Jev" in result.output
+    assert "TypeSafe Jev" not in result.output
     assert "faster-whisper" in result.output
     assert "Traceback" not in result.output
     assert isinstance(result.exception, SystemExit)
@@ -61,7 +55,7 @@ def test_doctor_checks_openai_without_secret_service(unavailable_storage, monkey
     if has_openai_key:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     checks = {check.name: check for check in doctor.run_checks()}
-    assert not checks["TypeSafe Jev"].ok
+    assert "TypeSafe Jev" not in checks
     if has_openai_key:
         assert checks["OpenAI transcription"].ok
     else:
@@ -69,21 +63,3 @@ def test_doctor_checks_openai_without_secret_service(unavailable_storage, monkey
     local_probe.assert_not_called()
 
 
-def test_doctor_uses_typesafe_environment_key_without_secret_service(unavailable_storage, monkeypatch):
-    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
-    checks = {check.name: check for check in doctor.run_checks()}
-    assert checks["TypeSafe Jev"].ok
-
-
-def test_doctor_explains_missing_typesafe_key(unavailable_storage, monkeypatch):
-    backend = Mock()
-    backend.get_password.return_value = None
-    monkeypatch.setattr(credentials, "_backend", lambda: backend)
-    checks = {check.name: check for check in doctor.run_checks()}
-    detail = checks["TypeSafe Jev"].detail
-    assert not checks["TypeSafe Jev"].ok
-    assert "not configured" in detail
-    assert "TYPESAFE_API_KEY" in detail
-    assert "automatic course classification" in detail
-    assert "optional when selecting a course manually" in detail
-    assert "OPENAI_API_KEY" not in detail

@@ -435,13 +435,11 @@ def preflight_run(options: RunOptions, vault_root: Path, video_root: Path) -> No
     from lecture_util.state import lecture_id
     from lecture_util.vault import default_cache_root, resolve_course, lecture_video_path, discover_courses
     source = options.source or resolve_source(options.url)
-    if options.course is not None:
-        course = resolve_course(options.course, vault_root)
-        video = lecture_video_path(video_root, course, options.lecture_date, options.title,
-                                   semester_start=options.semester_start)
-    else:
-        discover_courses(vault_root)
-        video = None
+    if not options.course:
+        raise LectureUtilError("Choose an explicit course with --course.")
+    course = resolve_course(options.course, vault_root)
+    video = lecture_video_path(video_root, course, options.lecture_date, options.title,
+                               semester_start=options.semester_start)
     paths = LecturePaths(default_cache_root() / f"lecture-{lecture_id(source.cache_key)}", video_path=video)
     from lecture_util.vault import _publication_record
     if _publication_record(paths.root / "publication.json").get("status") == "pending":
@@ -497,9 +495,9 @@ def _execute_run_locked(
     cache_root: Path | None = None,
     console: Console,
 ) -> None:
-    from lecture_util.vault import discover_courses
     source = options.source or resolve_source(options.url)
-    auto_course = options.course is None
+    if not options.course:
+        raise LectureUtilError("Choose an explicit course with --course.")
     lecture_date = validate_lecture_date(options.lecture_date)
     semester_start = validate_semester_start(
         options.semester_start
@@ -508,45 +506,32 @@ def _execute_run_locked(
     title = validate_title(options.title)
     journal = (cache_root or default_cache_root()) / f"lecture-{lecture_id(source.cache_key)}" / "publication.json"
 
-    if not auto_course:
-        course = resolve_course(options.course, vault_root)
-        published = published_lecture_paths(
-            course,
-            lecture_date,
-            title,
-            semester_start=semester_start,
-        )
-        ensure_paths_available(published, journal=journal)
-        video = lecture_video_path(
-            video_root or default_cache_root(),
-            course,
-            lecture_date,
-            title,
-            semester_start=semester_start,
-        )
-        lecture_label = f"{course.name} · {lecture_date} {title}"
-        stage_names = (
-            ("download", "audio", "transcription", "summary", "publication")
-            if source.kind == "hls"
-            else ("audio", "transcription", "summary", "publication")
-        )
-    else:
-        courses = discover_courses(vault_root)
-        course = None
-        published = None
-        video = None
-        lecture_label = f"[Auto] · {lecture_date} {title}"
-        stage_names = (
-            ("download", "audio", "transcription", "summary", "classification", "publication")
-            if source.kind == "hls"
-            else ("audio", "transcription", "summary", "classification", "publication")
-        )
-
+    course = resolve_course(options.course, vault_root)
+    published = published_lecture_paths(
+        course,
+        lecture_date,
+        title,
+        semester_start=semester_start,
+    )
+    ensure_paths_available(published, journal=journal)
+    video = lecture_video_path(
+        video_root or default_cache_root(),
+        course,
+        lecture_date,
+        title,
+        semester_start=semester_start,
+    )
+    lecture_label = f"{course.name} · {lecture_date} {title}"
+    stage_names = (
+        ("download", "audio", "transcription", "summary", "publication")
+        if source.kind == "hls"
+        else ("audio", "transcription", "summary", "publication")
+    )
     summarizer = CodexSummarizer(
         model=options.llm_model, reasoning_effort=options.reasoning_effort,
     )
     pending = _publication_record(journal).get("status") == "pending"
-    if not pending and not auto_course:
+    if not pending:
         RunState(LecturePaths(journal.parent), read_only=True)
         save_request(journal.parent, replace(options, semester_start=semester_start),
                      vault_root, video_root or default_cache_root())
@@ -559,8 +544,6 @@ def _execute_run_locked(
     ) as progress:
         if pending:
             cached_stages = ("download", "audio", "transcription", "summary")
-            if auto_course:
-                cached_stages = ("download", "audio", "transcription", "summary", "classification")
             for cached_stage in cached_stages:
                 report(progress, cached_stage, "cached", "Resuming recorded publication")
             summary_text = transcript_text = ""
@@ -569,7 +552,7 @@ def _execute_run_locked(
                 options.url,
                 cache_root or default_cache_root(),
                 summarizer,
-                video_path=video if (source.kind == "hls" and not auto_course) else None,
+                video_path=video if (source.kind == "hls") else None,
                 source=source,
                 title=title,
                 course=course.name if course else None,
@@ -589,46 +572,6 @@ def _execute_run_locked(
             )
             summary_text = paths.summary.read_text(encoding="utf-8")
             transcript_text = paths.transcript_markdown.read_text(encoding="utf-8")
-
-            if auto_course:
-                from lecture_util.classifier import classify_lecture_course
-                report(progress, "classification", "start", "Classifying course with Typesafe AI Jev")
-                classification = classify_lecture_course(title, summary_text, courses)
-                course = resolve_course(classification.selected_course, vault_root)
-                report(
-                    progress,
-                    "classification",
-                    "complete",
-                    f"Selected course: {course.name} (confidence: {classification.confidence:.2f})",
-                )
-                published = published_lecture_paths(
-                    course,
-                    lecture_date,
-                    title,
-                    semester_start=semester_start,
-                )
-                ensure_paths_available(published, journal=journal)
-                video = lecture_video_path(
-                    video_root or default_cache_root(),
-                    course,
-                    lecture_date,
-                    title,
-                    semester_start=semester_start,
-                )
-                if source.kind == "hls" and paths.video.is_file():
-                    finalize_lecture_video(paths.video, video, force=options.force)
-                    paths.video = video
-                    video_state = RunState(LecturePaths(journal.parent))
-                    video_state.complete_stage(
-                        "download", output=str(video), sha256=video_state.digest(video),
-                    )
-                RunState(LecturePaths(journal.parent), read_only=True)
-                save_request(
-                    journal.parent,
-                    replace(options, course=course.name, semester_start=semester_start),
-                    vault_root,
-                    video_root or default_cache_root(),
-                )
 
         assert published is not None
         assert course is not None

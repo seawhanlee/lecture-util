@@ -1,6 +1,6 @@
 [project]
 name = "lecture-util"
-version = "0.3.6"
+version = "0.4.0"
 description = "Download HLS lectures, transcribe them locally or with OpenAI, and create LLM study notes"
 readme = "README.md"
 authors = [
@@ -18,7 +18,6 @@ dependencies = [
     "nvidia-cublas-cu12>=12; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cudnn-cu12>=9; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "textual>=8.2.8",
-    "typesafe-sdk>=0.7.0",
 ]
 
 [dependency-groups]

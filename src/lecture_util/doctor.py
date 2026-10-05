@@ -22,27 +22,6 @@ def run_checks() -> list[Check]:
         path = shutil.which(executable)
         checks.append(Check(executable, path is not None, path or "not found on PATH"))
 
-    from lecture_util.credentials import resolve_typesafe_api_key
-    try:
-        typesafe_key = resolve_typesafe_api_key(required=False)
-    except LectureUtilError:
-        checks.append(Check(
-            "TypeSafe Jev", False,
-            "Could not read the TypeSafe API key from OS credential storage. "
-            "Set TYPESAFE_API_KEY to enable automatic course classification. "
-            "This is optional when selecting a course manually.",
-        ))
-    else:
-        if typesafe_key:
-            checks.append(Check("TypeSafe Jev", True, "API key configured for auto-classification"))
-        else:
-            checks.append(Check(
-                "TypeSafe Jev", False,
-                "TypeSafe API key not configured. Set TYPESAFE_API_KEY "
-                "to enable automatic course classification. "
-                "This is optional when selecting a course manually.",
-            ))
-
     from lecture_util.configuration import load_config
     try:
         config = load_config(validate_vault=False)

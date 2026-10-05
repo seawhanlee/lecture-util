@@ -50,17 +50,15 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
     table = Table(title="Choose a course")
     table.add_column("Number", justify="right")
     table.add_column("Course")
-    if not video_only:
-        table.add_row("0", Text("[Auto-detect with Jev]", style="cyan"))
     for number, course_item in enumerate(courses, 1):
         table.add_row(str(number), Text(course_item.name))
     console.print(table)
-    valid_choices = [str(index) for index in range(0 if not video_only else 1, len(courses) + 1)]
+    valid_choices = [str(index) for index in range(1, len(courses) + 1)]
     number = IntPrompt.ask(
         "Course", choices=valid_choices,
-        default=0 if not video_only else 1, console=console,
+        default=1, console=console,
     )
-    course = None if number == 0 else courses[number - 1]
+    course = courses[number - 1]
     start = date.fromisoformat(config.semester_start)
     default_week = max(1, (date.today() - start).days // 7 + 1)
     while True:
@@ -106,7 +104,7 @@ def prompt_lecture(url: str, config: AppConfig, console: Console) -> RunOptions 
     preview = Table(title="Lecture settings", show_header=False)
     for label, value in (
         ("Source", source.location),
-        ("Course", course.name if course else "[Auto-detect with Jev]"),
+        ("Course", course.name),
         ("Week", str(week)),
         ("Date", lecture_date),
         ("Title", title),

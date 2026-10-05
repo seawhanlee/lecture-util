@@ -265,75 +265,19 @@ def test_failed_force_download_can_resume_replacement(tmp_path):
     assert paths.video.read_bytes() == b'new'
 
 
-def test_execute_run_with_auto_course_classification(tmp_path):
-    from unittest.mock import patch, MagicMock
-    from rich.console import Console
-    from io import StringIO
+def test_execute_run_requires_explicit_course(tmp_path):
     from lecture_util.pipeline import _execute_run_locked
-    from lecture_util.models import RunOptions, LecturePaths, CourseClassificationResult
-    from lecture_util.vault import COURSES_DIRECTORY
+    from lecture_util.models import RunOptions
+    from lecture_util.errors import LectureUtilError
+    from rich.console import Console
 
-    vault = tmp_path / "vault"
-    cache = tmp_path / "cache"
-    videos = tmp_path / "videos"
-
-    (vault / COURSES_DIRECTORY / "MachineLearning" / "Lectures").mkdir(parents=True)
-    (vault / COURSES_DIRECTORY / "OperatingSystems" / "Lectures").mkdir(parents=True)
-
-    cached = LecturePaths(cache / "lecture-test")
-    cached.root.mkdir(parents=True)
-    cached.summary.write_text("### 요약\n- 가상 메모리와 페이징 기법\n", encoding="utf-8")
-    cached.transcript_markdown.write_text("# Transcript\n내용\n", encoding="utf-8")
-    cached.video.write_bytes(b"temp-video")
-
-    options = RunOptions(
-        url="https://example.com/test.m3u8",
-        course=None,
-        lecture_date="2026-09-07",
-        title="페이징 기법",
-        llm_model=None,
-        tags=None,
-        whisper_model="large-v3",
-        language="ko",
-        device="auto",
-        prompt="",
-        force=False,
-    )
-
-    mock_classification = CourseClassificationResult(
-        selected_course="OperatingSystems",
-        confidence=0.94,
-        probabilities={"OperatingSystems": 0.94, "MachineLearning": 0.06},
-    )
-
-    terminal = StringIO()
-    with (
-        patch("lecture_util.pipeline.run_lecture", return_value=cached),
-        patch("lecture_util.classifier.classify_lecture_course", return_value=mock_classification),
-        patch("lecture_util.pipeline.publish_lecture_notes") as mock_publish,
-    ):
-        _execute_run_locked(
-            options,
-            vault_root=vault,
-            video_root=videos,
-            cache_root=cache,
-            console=Console(file=terminal, force_terminal=True),
-        )
-
-    mock_publish.assert_called_once()
-    published_course = mock_publish.call_args.kwargs["course"]
-    assert published_course.name == "OperatingSystems"
-    from lecture_util.state import RunState, lecture_id
-    state = RunState(LecturePaths(cache / f"lecture-{lecture_id(options.url)}"), read_only=True)
-    video = videos / "OperatingSystems" / "2주차" / "페이징 기법.mp4"
-    assert state.data["stages"]["download"]["output"] == str(video)
-    assert state.data["stages"]["download"]["sha256"] == file_digest(video)
-    assert not cached.root.joinpath("source.mp4").exists()
-    restored_paths = LecturePaths(state.paths.root, video_path=video)
-    with patch("lecture_util.pipeline.download_hls") as download:
-        download_stage(restored_paths, state)
-    download.assert_not_called()
-
+    options = RunOptions("https://example.com/test.m3u8", None, "2026-09-07",
+                         "Lecture", None, None, "turbo", "ko", "cpu", "", False)
+    import pytest
+    with patch("lecture_util.pipeline.run_lecture") as run:
+        with pytest.raises(LectureUtilError, match="explicit course"):
+            _execute_run_locked(options, vault_root=tmp_path, console=Console())
+        run.assert_not_called()
 
 
 def test_finalize_video_does_not_copy_posix_metadata(tmp_path):

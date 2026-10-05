@@ -670,7 +670,7 @@ def test_explicit_beam_default_resets_saved_value(tmp_path):
     assert transcribe.call_args.kwargs['beam_size'] is None
 
 
-def test_run_without_course_invokes_with_none():
+def test_run_without_course_fails_before_processing():
     from unittest.mock import patch
     runner = CliRunner()
     with (
@@ -678,9 +678,9 @@ def test_run_without_course_invokes_with_none():
         patch("lecture_util.cli._execute_run") as mock_execute,
     ):
         result = runner.invoke(app, ["run", "https://example.com/test.m3u8", "--date", "2026-09-07", "--title", "테스트 강의"])
-    assert result.exit_code == 0, result.output
-    options = mock_execute.call_args.args[0]
-    assert options.course is None
+    assert result.exit_code != 0
+    assert "--course" in result.output
+    mock_execute.assert_not_called()
 
 
 def test_run_video_only_without_course_fails():
@@ -689,5 +689,5 @@ def test_run_video_only_without_course_fails():
     with patch("lecture_util.cli.load_config", return_value=configured_defaults()):
         result = runner.invoke(app, ["run", "https://example.com/test.m3u8", "--date", "2026-09-07", "--title", "테스트 강의", "--video-only"])
     assert result.exit_code != 0
-    assert "--video-only requires an explicit --course" in result.output
+    assert "--course" in result.output
 

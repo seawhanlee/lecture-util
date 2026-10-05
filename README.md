@@ -119,17 +119,15 @@ OpenAI API 전사는 GPU나 로컬 Whisper 모델을 실행하지 않습니다. 
 
 ### WSL
 
-WSL에서도 Linux 설치 절차를 사용합니다. Secret Service가 없는 환경에서도 로컬 전사와 수동 과목 선택은 API 키 없이 사용할 수 있습니다. OpenAI API 전사나 TypeSafe 자동 과목 분류를 사용할 때는 WSL 셸에서 필요한 키만 환경변수로 설정하세요.
+WSL에서도 Linux 설치 절차를 사용합니다. Secret Service가 없는 환경에서도 로컬 전사와 수동 과목 선택은 API 키 없이 사용할 수 있습니다. OpenAI API 전사를 사용할 때는 WSL 셸에서 키를 환경변수로 설정하세요.
 
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"  # OpenAI API 전사 사용 시
-export TYPESAFE_API_KEY="your-typesafe-api-key"  # 자동 과목 분류 사용 시
 uv run lecture-util doctor
 ```
 
 환경변수로 키를 설정했다면 온보딩·`config`의 API 키 입력창은 비워 두세요. 설정 화면에서 키를 저장하거나 삭제하는 기능은 실행 중인 Secret Service가 필요합니다. 평문 파일로 자동 대체 저장하지 않습니다.
 
-`doctor`는 보안 저장소를 사용할 수 없어도 TypeSafe 진단 결과와 환경변수 안내를 표시하고 나머지 점검을 계속합니다. TypeSafe 항목은 자동 과목 분류에 필요한 `TYPESAFE_API_KEY`만 안내하며, 수동 과목 선택에는 이 키가 필요하지 않습니다. 선택 기능인 TypeSafe 키가 없거나 다른 점검이 실패하면 종료 코드는 `1`이며, 수동 과목 선택을 막지는 않습니다. GPU가 없는 WSL에서는 로컬 전사 장치를 `CPU`로 선택하거나 `--device cpu`를 지정하세요.
 
 ## 온보딩과 Vault 준비
 
@@ -204,7 +202,7 @@ uv run lecture-util
 
 | 항목 | 설명 |
 | --- | --- |
-| Course | Vault에서 자동 탐색한 과목 선택지 (기본값: [Auto-detect with Jev] 자동 판별) |
+| Course | Vault에서 자동 탐색한 과목 선택지 (기본값: 첫 과목) |
 | Lecture date | 강의 날짜. 기본값은 프로그램을 실행한 주의 월요일이며 `YYYY-MM-DD` 형식으로 수정 가능 |
 | Lecture title | 파일명과 노트 제목에 사용할 강의 제목 |
 | HLS URL or local media path | 공개 HLS URL 또는 로컬 영상·녹음 파일 경로 |
@@ -271,7 +269,7 @@ Complete <Obsidian Vault>/10 Academics/Courses/공기역학특론/Lectures/1주�
 
 ## `run` 명령 사용법
 
-TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 입력 소스(HLS URL 또는 로컬 파일 경로), 날짜와 제목은 필수입니다. `--course`는 생략할 수 있으며, 생략 시 전사와 요약을 완료한 후 **Typesafe AI의 Jev**를 활용하여 적절한 과목을 자동 판별합니다.
+TUI 없이 강의 하나를 처리하려면 `run` 명령을 사용합니다. 먼저 `lecture-util onboard`를 완료해야 하며 입력 소스(HLS URL 또는 로컬 파일 경로), 날짜와 제목은 필수입니다. `--course`도 필수이며 과목을 직접 지정합니다.
 
 ```bash
 uv run lecture-util run \
@@ -282,24 +280,6 @@ uv run lecture-util run \
 ```
 
 과목 이름은 `Courses` 아래의 실제 디렉터리 이름과 정확히 일치해야 합니다. 한 번에 강의 하나만 처리하며 URL 목록을 받는 `--input` 배치 모드는 지원하지 않습니다.
-
-### Typesafe AI Jev를 통한 과목 자동 분류
-
-`--course` 옵션을 지정하지 않으면 영상 다운로드(또는 로컬 미디어 준비), 오디오 추출, 전사, 요약 단계를 먼저 수행합니다. 요약이 완료된 후 생성된 `summary.md`의 구조화된 요약 내용과 강의 제목을 바탕으로 Typesafe AI의 System One 모델인 Jev(`Choice` primitive)를 호출하여 Vault 내의 과목 중 가장 적합한 과목을 자동으로 판별하고 해당 과목 폴더에 노트를 발행합니다.
-
-```bash
-# --course를 생략하면 Jev가 요약본을 분석하여 과목을 자동 결정합니다
-export TYPESAFE_API_KEY="your-typesafe-api-key"
-uv run lecture-util run \
-  'https://example.com/lecture/index.m3u8' \
-  --date 2026-09-04 \
-  --title '압축성 유동'
-```
-
-- **API 키 설정**: `TYPESAFE_API_KEY` 환경변수를 설정하거나 OS 키체인에 등록할 수 있습니다. `lecture-util doctor`로 키 등록 상태를 점검할 수 있습니다.
-- **대화형 / TUI 지원**: 대화형 프롬프트(`lecture-util URL`) 및 TUI(`lecture-util`) 모두 과목 선택의 기본값으로 `[Auto-detect with Jev]` 옵션이 지정됩니다.
-- **영상 저장**: HLS 비디오는 코스가 확정되기 전까지 캐시 워크스페이스에 임시 저장되며, Jev 판별로 과목이 결정된 후 최종 영상 보관 디렉터리로 안전하게 이동됩니다.
-- `--video-only` 모드는 전사와 요약을 건너뛰므로 명시적인 `--course` 지정이 필요합니다.
 
 기본 학기 시작일은 온보딩에서 저장한 값입니다. 시작일부터 7일씩 `1주차`, `2주차` 등으로 계산하며, 다른 기준일이 필요한 한 번의 실행에서는 `--semester-start`로 덮어쓸 수 있습니다.
 
@@ -513,7 +493,6 @@ Codex가 생성한 요약...
 
 MP4 영상은 온보딩에서 설정한 경로 아래에 과목, 학기 주차와 강의 제목으로 저장합니다. 강의일 자체는 파일명에 넣지 않습니다.
 
-과목 자동 분류 후 캐시의 영상을 보관소로 옮길 때는 파일 내용만 복사하므로 POSIX 권한·시간 정보 변경을 지원하지 않는 NAS/WSL 공유 폴더도 사용할 수 있습니다. 복사가 끝난 뒤 최종 파일명으로 바꾸고 다운로드 기록의 경로를 갱신합니다. 이동 실패 시 캐시 원본을 보존하며, 이전 실패로 같은 내용의 영상이 보관소에 남았다면 재시도 시 재사용합니다. 내용이 다른 기존 영상은 `--force` 없이 교체하지 않습니다.
 
 ```text
 ~/Videos/lecture-util/
