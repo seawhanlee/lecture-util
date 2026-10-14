@@ -161,12 +161,16 @@ class FormApp(App[T]):
                     yield Label("", id="preview-content", markup=False)
         yield Label("", id="error", markup=False)
         with Horizontal(id="actions"):
-            yield Label(
-                f"Tab Navigate · {self.shortcut} {self.submit_label} · Esc Cancel",
-                id="key-hint",
-            )
+            yield Label(self.key_hint(), id="key-hint")
+            yield from self.compose_extra_actions()
             yield Button("Cancel", id="cancel")
             yield Button(self.submit_label, id=self.submit_id, variant="primary")
+
+    def key_hint(self) -> str:
+        return f"Tab Navigate · {self.shortcut} {self.submit_label} · Esc Cancel"
+
+    def compose_extra_actions(self) -> ComposeResult:
+        yield from ()
 
     def compose_fields(self) -> ComposeResult:
         raise NotImplementedError

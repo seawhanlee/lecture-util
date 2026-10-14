@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 import pytest
@@ -7,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from textual.widgets import Collapsible, Input, Label, Select, TextArea
+from textual.widgets import Checkbox, Collapsible, Input, Label, Select, TextArea
 
 from lecture_util.configuration import AppConfig
 from lecture_util.summary import DEFAULT_PROMPT
@@ -555,7 +556,7 @@ class MaterialsFormTests(unittest.IsolatedAsyncioTestCase):
         from lecture_util.materials import discover_materials, register_directory
         from lecture_util.models import RunOptions
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             create_vault(root)
             pdfs = root / 'PDF 자료'
             pdfs.mkdir()
@@ -573,3 +574,87 @@ class MaterialsFormTests(unittest.IsolatedAsyncioTestCase):
                 assert app.query_one('#materials-dirs', TextArea).text == str(pdfs)
                 assert str(pdfs) in str(app.query_one('#registered-materials', Label).render())
                 assert app._build_options() == initial
+
+
+class HistoryFormTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ctrl_o_and_button_open_history_screen(self):
+        from lecture_util.history import HistoryScreen
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            create_vault(root)
+            app = configured_app(root)
+            async with app.run_test(size=(100, 40)) as pilot:
+                await pilot.press("ctrl+o")
+                await pilot.pause()
+                assert isinstance(app.screen, HistoryScreen)
+                await pilot.press("escape")
+                await pilot.pause()
+                assert not isinstance(app.screen, HistoryScreen)
+                await pilot.click("#history")
+                await pilot.pause()
+                assert isinstance(app.screen, HistoryScreen)
+
+    async def test_history_reuse_populates_form(self):
+        from lecture_util.history import HistoryAction
+        from lecture_util.models import RunOptions
+        from lecture_util.recovery import save_request
+        from lecture_util.state import lecture_id
+        from lecture_util.vault import default_cache_root
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            create_vault(root)
+            app = configured_app(root)
+            options = RunOptions(
+                URL, COURSE, "2026-09-07", "Historic Title", "gpt-test", ["tag1"],
+                "turbo", "ko", "cpu", "Historic prompt", True, "2026-08-31",
+            )
+            cache_dir = default_cache_root().resolve() / f"lecture-{lecture_id(URL)}"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                save_request(cache_dir, options, root, root.parent / "videos")
+                (cache_dir / "run.json").write_text(json.dumps({
+                    "url": URL, "title": "Historic Title", "course": COURSE,
+                    "lecture_date": "2026-09-07", "updated_at": "2026-10-01T00:00:00+00:00",
+                    "stages": {"transcription": {"status": "complete"}},
+                }), encoding="utf-8")
+                async with app.run_test(size=(100, 40)) as pilot:
+                    app._on_history(HistoryAction("edit", cache_dir))
+                    await pilot.pause()
+                    assert app.query_one("#lecture-title", Input).value == "Historic Title"
+                    assert app.query_one("#course", Select).value == COURSE
+                    assert app.query_one("#prompt-mode", Select).value == "inline"
+                    assert app.query_one("#inline-prompt", TextArea).text == "Historic prompt"
+                    assert not app.query_one("#force", Checkbox).value
+            finally:
+                import shutil
+                shutil.rmtree(cache_dir, ignore_errors=True)
+
+    async def test_history_resume_exits_app(self):
+        from lecture_util.history import HistoryAction
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            create_vault(root)
+            app = configured_app(root)
+            fake_dir = root / "lecture-fake"
+            async with app.run_test(size=(100, 40)) as pilot:
+                app._on_history(HistoryAction("resume", fake_dir))
+                await pilot.pause()
+            assert app.return_value == HistoryAction("resume", fake_dir)
+
+    async def test_history_reuse_corrupt_request_displays_error(self):
+        from lecture_util.history import HistoryAction
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            create_vault(root)
+            app = configured_app(root)
+            bad_dir = root / "lecture-bad"
+            bad_dir.mkdir(parents=True)
+            (bad_dir / "request.json").write_text("not json", encoding="utf-8")
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.query_one("#lecture-title", Input).value = "Existing Title"
+                app._on_history(HistoryAction("edit", bad_dir))
+                await pilot.pause()
+                assert app.is_running
+                assert app.query_one("#lecture-title", Input).value == "Existing Title"
+                assert "Could not resume" in str(app.query_one("#error", Label).render())
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
@@ -25,9 +26,11 @@ from lecture_util.configuration import (
     resolve_prompt,
 )
 from lecture_util.errors import LectureUtilError
+from lecture_util.history import HistoryAction, HistoryScreen
 from lecture_util.pipeline import preflight_run
 from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionSettings
 from lecture_util.models import RunOptions
+from lecture_util.recovery import load_request
 from lecture_util.state import lecture_id
 from lecture_util.vault import default_cache_root
 from lecture_util.media import resolve_source
@@ -50,11 +53,12 @@ def _week_monday(today: date | None = None) -> str:
     return (current_date - timedelta(days=current_date.weekday())).isoformat()
 
 
-class LectureSetupApp(FormApp[RunOptions]):
+class LectureSetupApp(FormApp[RunOptions | HistoryAction]):
     heading = "New lecture"
     description = "Download, transcribe, and turn a lecture into study notes."
     BINDINGS = [
         Binding("ctrl+r", "submit", "Run", priority=True),
+        Binding("ctrl+o", "history", "History", priority=True),
         Binding("escape", "cancel", "Cancel"),
     ]
 
@@ -161,9 +165,50 @@ class LectureSetupApp(FormApp[RunOptions]):
             self.action_cancel()
         elif event.button.id == "run":
             self._submit()
+        elif event.button.id == "history":
+            self.action_history()
+
+    def key_hint(self) -> str:
+        return f"Tab Navigate · {self.shortcut} {self.submit_label} · Ctrl+O History · Esc Cancel"
+
+    def compose_extra_actions(self) -> ComposeResult:
+        yield Button("History", id="history")
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # Form shortcuts are priority bindings; keep them inert while history is open.
+        if action in {"submit", "history", "cancel"} and self.screen is not self.screen_stack[0]:
+            return False
+        return super().check_action(action, parameters)
 
     def action_submit(self) -> None:
         self._submit()
+
+    def action_history(self) -> None:
+        if self.checking:
+            return
+        self.push_screen(HistoryScreen(default_cache_root()), self._on_history)
+
+    def _on_history(self, action: HistoryAction | None) -> None:
+        if action is None:
+            return
+        if action.kind == "resume":
+            self.exit(action)
+            return
+        try:
+            options, _, _ = load_request(action.lecture_dir)
+            if options.course not in {course.name for course in self.courses}:
+                raise LectureUtilError(f"Course is no longer in the Vault: {options.course}")
+        except LectureUtilError as error:
+            self.error_field = None
+            self.show_error(error)
+            return
+        # Rediscover PDFs for the new run instead of pinning the old snapshot.
+        self.initial = replace(options, force=False, materials_files=None)
+        self._restore_input(self.initial)
+        self._update_prompt_mode()
+        self.query_one("#error", Label).display = False
+        self.refresh_preview()
+        self.query_one("#lecture-title", Input).focus()
 
     def _select_value(self, selector: str) -> str:
         return cast(str, self.query_one(selector, Select).value)
@@ -385,5 +430,8 @@ class LectureSetupApp(FormApp[RunOptions]):
         return options
 
 
-def run_tui(config: AppConfig | None = None, *, initial: RunOptions | None = None) -> RunOptions | None:
+def run_tui(
+    config: AppConfig | None = None, *, initial: RunOptions | None = None,
+) -> RunOptions | HistoryAction | None:
+    """Return new run options, a resume request chosen from history, or None on cancel."""
     return LectureSetupApp(config=config, initial=initial).run()

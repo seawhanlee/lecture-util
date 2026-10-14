@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date
 import sys
 from pathlib import Path
@@ -15,6 +15,7 @@ from rich.text import Text
 from rich.prompt import Confirm, Prompt
 
 from lecture_util.configuration import (
+    AppConfig,
     validate_provider_overrides,
     default_app_config,
     default_config_path,
@@ -29,6 +30,7 @@ from lecture_util.configuration import (
 from lecture_util.console_progress import ConsoleProgressReporter
 from lecture_util.doctor import run_checks
 from lecture_util.errors import LectureUtilError
+from lecture_util.history import HistoryAction, run_history
 from lecture_util.interactive import prompt_lecture
 from lecture_util.media import resolve_source, validate_hls_url
 from lecture_util.models import LecturePaths, RunOptions
@@ -213,6 +215,79 @@ def _interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+@dataclass(frozen=True, slots=True)
+class _RunTarget:
+    options: RunOptions
+    vault_root: Path
+    video_root: Path
+    cache_root: Path | None = None
+
+
+def _resolve_selection(
+    selection: RunOptions | HistoryAction | None, config: AppConfig,
+) -> _RunTarget | None:
+    if selection is None:
+        return None
+    if isinstance(selection, HistoryAction):
+        # Same contract as `lecture-util resume`: recorded settings and paths only.
+        root = selection.lecture_dir.resolve()
+        options, vault, videos = load_request(root)
+        return _RunTarget(options, vault, videos, root.parent)
+    return _RunTarget(selection, config.vault_root, config.video_root)
+
+
+def _run_target(target: _RunTarget) -> None:
+    extra = {"cache_root": target.cache_root} if target.cache_root is not None else {}
+    _execute_run(target.options, vault_root=target.vault_root,
+                 video_root=target.video_root, **extra)
+
+
+def _interactive_run_loop(config: AppConfig, selection: RunOptions | HistoryAction | None) -> None:
+    target = _resolve_selection(selection, config)
+    while target is not None:
+        try:
+            _run_target(target)
+            return
+        except KeyboardInterrupt:
+            console.print("Interrupted; use the resume command above.")
+            raise typer.Exit(130)
+        except Exception as error:
+            console.print(Text(str(error), style="red"))
+            choice = ActionPrompt.ask(
+                "Next action",
+                choices=["retry", "clear-cache", "edit", "quit"],
+                default="quit",
+                console=console,
+            )
+            if choice == "quit":
+                raise typer.Exit(1)
+            options = target.options
+            if choice == "clear-cache":
+                source = options.source or resolve_source(options.url)
+                cache_root = (target.cache_root or default_cache_root()).resolve()
+                cache_dir = cache_root / f"lecture-{lecture_id(source.cache_key)}"
+                clear_workspace(cache_dir)
+                console.print(f"[yellow]Cleared cache:[/yellow] {cache_dir}")
+                target = replace(target, options=replace(options, force=True))
+            elif choice == "edit":
+                target = _resolve_selection(run_tui(config, initial=replace(options, force=False)), config)
+            else:
+                target = replace(target, options=replace(options, force=False))
+    console.print("Cancelled before processing.")
+
+
+def _ensure_config() -> AppConfig | None:
+    config = load_config()
+    if config is None:
+        config = run_onboarding(default_app_config())
+        if config is None:
+            console.print("Cancelled before setup.")
+            return None
+        config = save_config(config)
+        console.print(f"[green]Configuration saved[/green] {default_config_path()}")
+    return config
+
+
 @app.callback()
 def root_callback(ctx: typer.Context) -> None:
     """Download, transcribe, and summarize LMS lectures.
@@ -226,45 +301,38 @@ def root_callback(ctx: typer.Context) -> None:
         console.print("Run 'lecture-util --help' for usage.")
         raise typer.Exit(2)
     try:
-        config = load_config()
+        config = _ensure_config()
         if config is None:
-            config = run_onboarding(default_app_config())
-            if config is None:
-                console.print("Cancelled before setup.")
-                return
-            config = save_config(config)
-            console.print(f"[green]Configuration saved[/green] {default_config_path()}")
-        options = run_tui(config)
-        if options is None:
-            console.print("Cancelled before processing.")
             return
-        while options is not None:
-            try:
-                _execute_run(options, vault_root=config.vault_root, video_root=config.video_root)
-                break
-            except KeyboardInterrupt:
-                console.print("Interrupted; use the resume command above.")
-                raise typer.Exit(130)
-            except Exception as error:
-                console.print(Text(str(error), style="red"))
-                choice = ActionPrompt.ask(
-                    "Next action",
-                    choices=["retry", "clear-cache", "edit", "quit"],
-                    default="quit",
-                    console=console,
-                )
-                if choice == "quit":
-                    raise typer.Exit(1)
-                if choice == "clear-cache":
-                    source = options.source or resolve_source(options.url)
-                    cache_dir = default_cache_root().resolve() / f"lecture-{lecture_id(source.cache_key)}"
-                    clear_workspace(cache_dir)
-                    console.print(f"[yellow]Cleared cache:[/yellow] {cache_dir}")
-                    options = replace(options, force=True)
-                else:
-                    options = replace(options, force=False)
-                    if choice == "edit":
-                        options = run_tui(config, initial=options)
+        _interactive_run_loop(config, run_tui(config))
+    except LectureUtilError as error:
+        console.print(f"[red]Error:[/red] {error}")
+        raise typer.Exit(1) from error
+
+
+@app.command("history")
+def history_command(
+    cache_root: Path | None = typer.Option(None, "--cache-root", help="Custom cache root directory"),
+) -> None:
+    """Browse past runs; resume, reuse settings, or clear their caches."""
+    if not _interactive_terminal():
+        console.print("[red]Error:[/red] history requires an interactive terminal.")
+        console.print("Use 'lecture-util cache list' or 'lecture-util resume LECTURE_DIR'.")
+        raise typer.Exit(2)
+    try:
+        config = _ensure_config()
+        if config is None:
+            return
+        selection: RunOptions | HistoryAction | None = run_history(cache_root)
+        if selection is None:
+            return
+        if selection.kind == "edit":
+            options, _, _ = load_request(selection.lecture_dir.resolve())
+            selection = run_tui(config, initial=replace(options, force=False, materials_files=None))
+        _interactive_run_loop(config, selection)
+    except KeyboardInterrupt:
+        console.print("Interrupted.")
+        raise typer.Exit(130)
     except LectureUtilError as error:
         console.print(f"[red]Error:[/red] {error}")
         raise typer.Exit(1) from error

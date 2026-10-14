@@ -691,3 +691,93 @@ def test_run_video_only_without_course_fails():
     assert result.exit_code != 0
     assert "--course" in result.output
 
+
+def test_history_requires_interactive_terminal():
+    runner = CliRunner()
+    with patch("lecture_util.cli._interactive_terminal", return_value=False):
+        result = runner.invoke(app, ["history"])
+    assert result.exit_code == 2
+    assert "interactive terminal" in result.output
+
+
+def test_history_resume_invokes_pipeline_with_recorded_paths(tmp_path):
+    from lecture_util.history import HistoryAction
+    runner = CliRunner()
+    config = configured_defaults()
+    lecture_dir = tmp_path / "cache" / "lecture-test"
+    target_options = options()
+    target_vault = Path("/recorded-vault")
+    target_videos = Path("/recorded-videos")
+
+    with (
+        patch("lecture_util.cli._interactive_terminal", return_value=True),
+        patch("lecture_util.cli.load_config", return_value=config),
+        patch("lecture_util.cli.run_history", return_value=HistoryAction("resume", lecture_dir)),
+        patch("lecture_util.cli.load_request", return_value=(target_options, target_vault, target_videos)),
+        patch("lecture_util.cli._execute_run") as mock_execute,
+    ):
+        result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0, result.output
+    mock_execute.assert_called_once_with(
+        target_options,
+        vault_root=target_vault,
+        video_root=target_videos,
+        cache_root=lecture_dir.parent,
+    )
+
+
+def test_history_edit_opens_tui_and_runs(tmp_path):
+    from lecture_util.history import HistoryAction
+    runner = CliRunner()
+    config = configured_defaults()
+    lecture_dir = tmp_path / "cache" / "lecture-test"
+    saved_options = options()
+    edited_options = replace(options(), title="Edited Title")
+
+    with (
+        patch("lecture_util.cli._interactive_terminal", return_value=True),
+        patch("lecture_util.cli.load_config", return_value=config),
+        patch("lecture_util.cli.run_history", return_value=HistoryAction("edit", lecture_dir)),
+        patch("lecture_util.cli.load_request", return_value=(saved_options, Path("/v"), Path("/vid"))),
+        patch("lecture_util.cli.run_tui", return_value=edited_options) as mock_tui,
+        patch("lecture_util.cli._execute_run") as mock_execute,
+    ):
+        result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0, result.output
+    mock_tui.assert_called_once()
+    mock_execute.assert_called_once_with(
+        edited_options,
+        vault_root=config.vault_root,
+        video_root=config.video_root,
+    )
+
+
+def test_bare_command_handles_history_resume(tmp_path):
+    from lecture_util.history import HistoryAction
+    runner = CliRunner()
+    config = configured_defaults()
+    lecture_dir = tmp_path / "cache" / "lecture-test"
+    target_options = options()
+    target_vault = Path("/recorded-vault")
+    target_videos = Path("/recorded-videos")
+
+    with (
+        patch("lecture_util.cli._interactive_terminal", return_value=True),
+        patch("lecture_util.cli.load_config", return_value=config),
+        patch("lecture_util.cli.run_tui", return_value=HistoryAction("resume", lecture_dir)),
+        patch("lecture_util.cli.load_request", return_value=(target_options, target_vault, target_videos)),
+        patch("lecture_util.cli._execute_run") as mock_execute,
+    ):
+        result = runner.invoke(app, [])
+
+    assert result.exit_code == 0, result.output
+    mock_execute.assert_called_once_with(
+        target_options,
+        vault_root=target_vault,
+        video_root=target_videos,
+        cache_root=lecture_dir.parent,
+    )
+
+
