@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import pytest
 from dataclasses import replace
 from io import StringIO
 from datetime import date
@@ -779,5 +780,84 @@ def test_bare_command_handles_history_resume(tmp_path):
         video_root=target_videos,
         cache_root=lecture_dir.parent,
     )
+
+
+def test_execute_run_notifies_on_success(tmp_path: Path) -> None:
+    opt = options()
+    with (
+        patch("lecture_util.pipeline.execute_run"),
+        patch("lecture_util.notifications.notify") as mock_notify,
+    ):
+        _execute_run(opt, vault_root=tmp_path / "vault", video_root=tmp_path / "videos", notify=True)
+    mock_notify.assert_called_once()
+    self_args = mock_notify.call_args[0]
+    assert self_args[0] == "lecture-util"
+    assert "✓" in self_args[1]
+    assert "압축성 유동" in self_args[1]
+
+
+def test_execute_run_notifies_on_failure(tmp_path: Path) -> None:
+    opt = options()
+    with (
+        patch("lecture_util.pipeline.execute_run", side_effect=LectureUtilError("LLM failed")),
+        patch("lecture_util.notifications.notify") as mock_notify,
+        pytest.raises(LectureUtilError),
+    ):
+        _execute_run(opt, vault_root=tmp_path / "vault", video_root=tmp_path / "videos", notify=True)
+    mock_notify.assert_called_once()
+    self_args = mock_notify.call_args[0]
+    assert self_args[0] == "lecture-util"
+    assert "✗" in self_args[1]
+    assert "LLM failed" in self_args[1]
+
+
+def test_execute_run_does_not_notify_on_keyboard_interrupt(tmp_path: Path) -> None:
+    opt = options()
+    with (
+        patch("lecture_util.pipeline.execute_run", side_effect=KeyboardInterrupt),
+        patch("lecture_util.notifications.notify") as mock_notify,
+        pytest.raises(KeyboardInterrupt),
+    ):
+        _execute_run(opt, vault_root=tmp_path / "vault", video_root=tmp_path / "videos", notify=True)
+    mock_notify.assert_not_called()
+
+
+def test_execute_run_does_not_notify_when_disabled(tmp_path: Path) -> None:
+    opt = options()
+    with (
+        patch("lecture_util.pipeline.execute_run"),
+        patch("lecture_util.notifications.notify") as mock_notify,
+    ):
+        _execute_run(opt, vault_root=tmp_path / "vault", video_root=tmp_path / "videos", notify=False)
+    mock_notify.assert_not_called()
+
+
+def test_run_command_no_notify_option(tmp_path: Path) -> None:
+    runner = CliRunner()
+    config = configured_defaults()
+    with (
+        patch("lecture_util.cli.load_config", return_value=config),
+        patch("lecture_util.cli._execute_run") as mock_execute,
+    ):
+        result = runner.invoke(app, [
+            "run", URL, "--course", COURSE, "--date", "2026-09-04",
+            "--title", "Test", "--no-notify",
+        ])
+    assert result.exit_code == 0, result.output
+    assert mock_execute.call_args.kwargs.get("notify") is False
+
+
+def test_resume_command_no_notify_option(tmp_path: Path) -> None:
+    runner = CliRunner()
+    target_options = options()
+    with (
+        patch("lecture_util.cli.load_config", return_value=configured_defaults()),
+        patch("lecture_util.cli.load_request", return_value=(target_options, Path("/v"), Path("/vid"))),
+        patch("lecture_util.cli._execute_run") as mock_execute,
+    ):
+        result = runner.invoke(app, ["resume", str(tmp_path), "--no-notify"])
+    assert result.exit_code == 0, result.output
+    assert mock_execute.call_args.kwargs.get("notify") is False
+
 
 

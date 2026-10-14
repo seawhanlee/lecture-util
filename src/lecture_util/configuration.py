@@ -42,6 +42,7 @@ class AppConfig:
     beam_size: int | None = None
     transcription_provider: str = "local"
     openai_transcription_model: str = "gpt-4o-transcribe"
+    notifications: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -155,6 +156,7 @@ def validate_app_config(
         video_in_vault_allowed=(
             config.video_in_vault_allowed if video_in_vault else False
         ),
+        notifications=config.notifications,
     )
 
 
@@ -199,6 +201,11 @@ def app_config_from_dict(
         raise LectureUtilError(
             "Configured Vault video storage confirmation must be true or false."
         )
+    notifications = data.get("notifications", True)
+    if not isinstance(notifications, bool):
+        raise LectureUtilError(
+            "Configured notifications setting must be true or false."
+        )
     return validate_app_config(
         AppConfig(
             vault_root=Path(vault_root),
@@ -215,6 +222,7 @@ def app_config_from_dict(
             llm_model=llm_model_value,
             reasoning_effort=normalize_reasoning_effort(data.get("reasoning_effort")),
             video_in_vault_allowed=video_in_vault_allowed,
+            notifications=notifications,
         ),
         validate_vault=validate_vault,
     )

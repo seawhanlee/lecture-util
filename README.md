@@ -149,6 +149,7 @@ uv run lecture-util doctor
 | Beam size | 빈 값 | 백엔드 기본값 사용 또는 양수 지정 |
 | Codex model | Codex 기본 설정 사용 | 설치된 Codex에서 조회한 모델을 드롭다운으로 선택 |
 | Thinking effort | Codex 기본 설정 사용 | 선택 모델의 추론 강도를 드롭다운으로 선택 |
+| Desktop notifications | 켜짐 | 강의 완료 및 실패 시 데스크톱 알림 발송 여부 |
 
 설정은 `$XDG_CONFIG_HOME/lecture-util/config.json`에 저장됩니다. `XDG_CONFIG_HOME`이 없으면 `~/.config/lecture-util/config.json`을 사용합니다. 설정을 바꾸려면 대화형 터미널에서 다음 명령을 실행합니다.
 
@@ -418,6 +419,20 @@ uv run lecture-util run URL \
 
 `--force`는 다운로드, 오디오 추출, 전사와 요약을 모두 다시 수행합니다. 기존 Vault 노트를 덮어쓰는 옵션은 아니므로 같은 날짜와 제목의 노트가 존재하면 `--force`를 사용해도 처리 전에 중단합니다.
 
+### 완료 및 실패 알림 (`--notify` / `--no-notify`)
+
+강의 처리가 완료되거나 실패했을 때 데스크톱 알림을 발송합니다. macOS는 `osascript` (알림 센터), Linux는 `notify-send`를 사용하며, 대화형 터미널(TTY) 환경에서는 터미널 벨 경고(`\a`)를 함께 울립니다.
+
+온보딩과 `config` 설정에서 기본 알림 여부를 켜거나 끌 수 있으며, 개별 실행 시 플래그로 덮어쓸 수 있습니다.
+
+```bash
+# 알림 비활성화하고 실행
+uv run lecture-util run URL --course '공기역학특론' --date 2026-09-04 --title '압축성 유동' --no-notify
+
+# 재개 시 알림 활성화
+uv run lecture-util resume "$HOME/.cache/lecture-util/lecture-xxx" --notify
+```
+
 ## 로컬 영상·녹음 처리
 
 기존 파일도 과목·주차별 전사문과 요약 노트로 발행할 수 있습니다.
@@ -603,6 +618,7 @@ uv run lecture-util resume "$HOME/.cache/lecture-util/lecture-0123456789"
 재개는 저장된 모델·경로·강의 정보·프롬프트·자료 목록을 사용하며 현재 전역 설정이나 과목 자료 등록을 다시 적용하지 않습니다. 자료가 없어졌거나 내용이 바뀌면 새 `run`을 실행하세요. 자료 분석 중 중단한 경우 완료된 페이지 묶음은 재사용합니다. 이전 요청에 자료 기록이 없으면 전사문만 사용하며, 과목이 없는 이전 자동 분류 요청은 과목을 지정한 새 실행이 필요합니다.
 완료된 단계는 재사용하고, 강제 재실행 옵션은 반복하지 않습니다. 실패한 강제 다운로드의 파일 교체 권한은 해당 시도의 상태에 기록되어 재시도에 적용됩니다.
 기존 작업공간에 `request.json`이 없으면 원래 URL과 메타데이터로 `run`을 다시 실행해야 합니다.
+재개 완료 및 실패 알림은 현재 저장된 데스크톱 알림 설정을 따르며, `--notify` 또는 `--no-notify`로 재정의할 수 있습니다.
 
 TUI 실행 실패 후에는 `retry`, `clear-cache`, `edit`, `quit`을 선택합니다. `clear-cache`(단축키 `c`)는 손상되었거나 유효하지 않은 작업공간 캐시를 삭제하고 처음부터 강제로 재시도하며, `edit`(단축키 `e`)은 입력과 프롬프트를 복원한 폼을 엽니다. `retry`는 `r`, `quit`은 `q`로도 입력할 수 있습니다.
 `Ctrl+C`는 재시도 없이 중단하며 종료 코드는 130입니다. TUI 제출 시 모델을 다운로드하지 않는 사전 검사를 비동기로 수행하고, 오류가 있으면 입력을 보존합니다.

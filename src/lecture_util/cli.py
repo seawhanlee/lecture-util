@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date
+from time import monotonic
 import sys
 from pathlib import Path
 
@@ -173,26 +174,41 @@ def _execute_download(
 def _execute_run(
     options: RunOptions, *, vault_root: Path = DEFAULT_VAULT_ROOT,
     video_root: Path | None = None, cache_root: Path | None = None,
+    notify: bool | None = None,
 ) -> None:
-    if options.video_only:
-        from lecture_util.materials import resolve_run_materials
-        resolve_run_materials(options, vault_root)
-        if not options.course:
-            raise LectureUtilError("An explicit --course is required.")
-        _execute_download(
-            options.url, course=options.course, title=options.title,
-            lecture_date=options.lecture_date,
-            semester_start=options.semester_start or default_semester_start(
-                date.fromisoformat(validate_lecture_date(options.lecture_date))
-            ),
-            vault_root=vault_root, video_root=video_root or default_cache_root(),
-            output_dir=cache_root or default_cache_root(), tags=options.tags,
-            force=options.force,
-        )
-        return
-    from lecture_util.pipeline import execute_run
-    execute_run(options, vault_root=vault_root, video_root=video_root,
-                cache_root=cache_root, console=console)
+    start_time = monotonic()
+    label = f"{options.course or 'Lecture'} · {options.lecture_date} {options.title}"
+    should_notify = True if notify is None else notify
+    try:
+        if options.video_only:
+            from lecture_util.materials import resolve_run_materials
+            resolve_run_materials(options, vault_root)
+            if not options.course:
+                raise LectureUtilError("An explicit --course is required.")
+            _execute_download(
+                options.url, course=options.course, title=options.title,
+                lecture_date=options.lecture_date,
+                semester_start=options.semester_start or default_semester_start(
+                    date.fromisoformat(validate_lecture_date(options.lecture_date))
+                ),
+                vault_root=vault_root, video_root=video_root or default_cache_root(),
+                output_dir=cache_root or default_cache_root(), tags=options.tags,
+                force=options.force,
+            )
+        else:
+            from lecture_util.pipeline import execute_run
+            execute_run(options, vault_root=vault_root, video_root=video_root,
+                        cache_root=cache_root, console=console)
+        if should_notify:
+            from lecture_util.notifications import notify as send_notification, run_succeeded_message
+            send_notification("lecture-util", run_succeeded_message(label, monotonic() - start_time))
+    except KeyboardInterrupt:
+        raise
+    except Exception as error:
+        if should_notify:
+            from lecture_util.notifications import notify as send_notification, run_failed_message
+            send_notification("lecture-util", run_failed_message(label, error))
+        raise
 
 
 class ActionPrompt(Prompt):
@@ -221,6 +237,7 @@ class _RunTarget:
     vault_root: Path
     video_root: Path
     cache_root: Path | None = None
+    notify: bool = True
 
 
 def _resolve_selection(
@@ -232,12 +249,14 @@ def _resolve_selection(
         # Same contract as `lecture-util resume`: recorded settings and paths only.
         root = selection.lecture_dir.resolve()
         options, vault, videos = load_request(root)
-        return _RunTarget(options, vault, videos, root.parent)
-    return _RunTarget(selection, config.vault_root, config.video_root)
+        return _RunTarget(options, vault, videos, root.parent, notify=config.notifications)
+    return _RunTarget(selection, config.vault_root, config.video_root, notify=config.notifications)
 
 
 def _run_target(target: _RunTarget) -> None:
     extra = {"cache_root": target.cache_root} if target.cache_root is not None else {}
+    if not target.notify:
+        extra["notify"] = False
     _execute_run(target.options, vault_root=target.vault_root,
                  video_root=target.video_root, **extra)
 
@@ -366,7 +385,10 @@ def interactive_command(url: str = typer.Argument(..., metavar="SOURCE", help="P
         if options is None:
             console.print("Cancelled before processing.")
             return
-        _execute_run(options, vault_root=config.vault_root, video_root=config.video_root)
+        run_extra: dict[str, Any] = {}
+        if not config.notifications:
+            run_extra["notify"] = False
+        _execute_run(options, vault_root=config.vault_root, video_root=config.video_root, **run_extra)
 
     _run_or_exit(action)
 
@@ -418,6 +440,7 @@ def run_command(
     video_only: bool = typer.Option(False, "--video-only", help="Download video without audio extraction or notes"),
     materials_dir: list[Path] | None = typer.Option(None, "--materials-dir", help="Additional PDF directory (repeatable)"),
     no_materials: bool = typer.Option(False, "--no-materials", help="Use the transcript only"),
+    notify: bool | None = typer.Option(None, "--notify/--no-notify", help="Send desktop notification on completion or failure"),
 ) -> None:
     """Process a URL or local media file and publish one lecture to the Obsidian vault."""
 
@@ -446,6 +469,10 @@ def run_command(
             if llm_model is None
             else llm_model.strip() or None
         )
+        notify_enabled = config.notifications if notify is None else notify
+        run_extra: dict[str, Any] = {}
+        if not notify_enabled:
+            run_extra["notify"] = False
         _execute_run(
             RunOptions(
                 url=validated_url,
@@ -474,6 +501,7 @@ def run_command(
             ),
             vault_root=config.vault_root,
             video_root=config.video_root,
+            **run_extra,
         )
 
     _run_or_exit(action)
@@ -663,12 +691,23 @@ def doctor_command() -> None:
 
 
 @app.command("resume")
-def resume_command(lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False)) -> None:
+def resume_command(
+    lecture_dir: Path = typer.Argument(..., exists=True, file_okay=False),
+    notify: bool | None = typer.Option(
+        None,
+        "--notify/--no-notify",
+        help="Send desktop notification on completion or failure",
+    ),
+) -> None:
     """Resume a recorded run using its original settings and prompt."""
     def action() -> None:
         options, vault, videos = load_request(lecture_dir.resolve())
+        extra: dict[str, Any] = {}
+        if notify is not None:
+            extra["notify"] = notify
         _execute_run(options, vault_root=vault, video_root=videos,
-                     cache_root=lecture_dir.resolve().parent)
+                     cache_root=lecture_dir.resolve().parent,
+                     **extra)
     _run_or_exit(action)
 
 

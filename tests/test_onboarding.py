@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from textual.widgets import Input, Label, Select
+from textual.widgets import Checkbox, Input, Label, Select
 
 from lecture_util.configuration import AppConfig
 from lecture_util.onboarding import OnboardingApp
@@ -152,3 +152,19 @@ class OnboardingInteractionTests(unittest.IsolatedAsyncioTestCase):
                 field.value = "turbo"
                 await pilot.press("ctrl+s")
             self.assertEqual(app.return_value.whisper_model, "turbo")
+
+    async def test_notifications_checkbox_controls_saved_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            create_vault(vault)
+            app = OnboardingApp(initial_config(vault))
+            async with app.run_test(size=(100, 32)) as pilot:
+                checkbox = app.query_one("#notifications", Checkbox)
+                self.assertTrue(checkbox.value)
+                self.assertIn("NOTIFICATIONS\nEnabled", str(app.query_one("#preview-content", Label).render()))
+                checkbox.value = False
+                await pilot.pause()
+                self.assertIn("NOTIFICATIONS\nDisabled", str(app.query_one("#preview-content", Label).render()))
+                await pilot.click("#save")
+            self.assertFalse(app.return_value.notifications)
+

@@ -7,7 +7,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label
+from textual.widgets import Button, Checkbox, Input, Label
 
 from lecture_util.configuration import (
     AppConfig,
@@ -103,6 +103,7 @@ class OnboardingApp(FormApp[AppConfig]):
         yield Input(value=str(self.initial.video_root), id="video-root")
         yield Label("Semester start date (YYYY-MM-DD)", classes="field-label")
         yield Input(value=self.initial.semester_start, id="semester-start")
+        yield Checkbox("Desktop notifications on completion or failure", value=self.initial.notifications, id="notifications")
         yield TranscriptionSettings(self.initial, credentials=True)
         yield CodexModelPicker(self.initial.llm_model, self.initial.reasoning_effort)
 
@@ -121,10 +122,12 @@ class OnboardingApp(FormApp[AppConfig]):
 
     def refresh_preview(self) -> None:
         transcription = self.query_one(TranscriptionSettings).preview()
+        notifications_enabled = self.query_one("#notifications", Checkbox).value
         self.query_one("#preview-content", Label).update(
             f"STORAGE\nVault\n{self.value('vault-root') or 'Choose a Vault'}"
             f"\n\nVideos\n{self.value('video-root') or 'Choose a folder'}"
             f"\n\nSEMESTER START\n{self.value('semester-start') or 'Choose a date'}"
+            f"\n\nNOTIFICATIONS\n{'Enabled' if notifications_enabled else 'Disabled'}"
             f"\n\nTRANSCRIPTION\n{transcription}"
             f"\nLanguage: {self.value('language') or 'Choose a language'}"
             f"\n\nSUMMARY\n{self.selected_model() or 'Codex default'}"
@@ -181,6 +184,7 @@ class OnboardingApp(FormApp[AppConfig]):
                 **transcription,
                 llm_model=self.selected_model(),
                 reasoning_effort=self.validated_effort(),
+                notifications=self.query_one("#notifications", Checkbox).value,
             ),
             allow_unconfirmed_video_root=True,
         )

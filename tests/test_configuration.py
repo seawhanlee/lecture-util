@@ -186,3 +186,33 @@ def test_invalid_transcription_tuning_is_rejected(changes):
     from lecture_util.configuration import validate_transcription_options
     with pytest.raises(LectureUtilError):
         validate_transcription_options(TranscriptionOptions(**changes))
+
+
+def test_notifications_setting_roundtrips_and_defaults(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    create_vault(vault)
+    path = tmp_path / "config.json"
+
+    # Default is True
+    save_config(config_for(vault), path)
+    config = load_config(path)
+    assert config.notifications is True
+
+    # Can be set to False
+    save_config(replace(config_for(vault), notifications=False), path)
+    config = load_config(path)
+    assert config.notifications is False
+
+    # Missing key in existing config defaults to True
+    data = json.loads(path.read_text())
+    del data["notifications"]
+    path.write_text(json.dumps(data))
+    config = load_config(path)
+    assert config.notifications is True
+
+    # Invalid type is rejected
+    data["notifications"] = "yes"
+    path.write_text(json.dumps(data))
+    with pytest.raises(LectureUtilError, match="notifications"):
+        load_config(path)
+
