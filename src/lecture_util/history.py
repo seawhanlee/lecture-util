@@ -16,6 +16,7 @@ from textual.widgets import Button, DataTable, Label
 
 from lecture_util.cache import CachedLecture, scan_cached_lectures
 from lecture_util.errors import LectureUtilError
+from lecture_util.navigation import VIM_BINDINGS, VimNavigation
 from lecture_util.progress import format_size
 from lecture_util.state import clear_workspace, is_workspace_locked
 from lecture_util.vault import default_cache_root
@@ -48,7 +49,7 @@ def unavailable_reason(item: CachedLecture, kind: Literal["resume", "edit", "cle
     return None
 
 
-class ConfirmClearScreen(ModalScreen[bool]):
+class ConfirmClearScreen(VimNavigation, ModalScreen[bool]):
     DEFAULT_CSS = """
     ConfirmClearScreen { align: center middle; background: $background 70%; }
     #confirm-dialog { width: 72; max-width: 95%; height: auto; padding: 1 2;
@@ -59,6 +60,7 @@ class ConfirmClearScreen(ModalScreen[bool]):
     #confirm-actions Button { margin-left: 1; }
     """
     BINDINGS = [
+        *VIM_BINDINGS,
         Binding("y", "confirm", "Delete"),
         Binding("escape,n", "cancel", "Keep"),
     ]
@@ -93,7 +95,7 @@ class ConfirmClearScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class HistoryScreen(Screen[HistoryAction | None]):
+class HistoryScreen(VimNavigation, Screen[HistoryAction | None]):
     DEFAULT_CSS = """
     HistoryScreen { align-horizontal: center; }
     #history-header { width: 120; max-width: 100%; height: auto; padding: 1 3; }
@@ -106,6 +108,7 @@ class HistoryScreen(Screen[HistoryAction | None]):
     #history-hint { width: 120; max-width: 100%; height: 1; padding: 0 3; color: $text-muted; }
     """
     BINDINGS = [
+        *VIM_BINDINGS,
         Binding("r", "resume", "Resume"),
         Binding("e", "edit", "Reuse settings"),
         Binding("c", "clear", "Clear cache"),
@@ -126,7 +129,7 @@ class HistoryScreen(Screen[HistoryAction | None]):
         yield Label("Loading cached lectures…", id="history-detail", markup=False)
         yield Label("", id="history-message", markup=False)
         yield Label(
-            "↑↓ Select · R Resume · E Reuse settings · C Clear cache · F5 Refresh · Esc Back",
+            "↑↓ / j/k Select · R Resume · E Reuse settings · C Clear cache · F5 Refresh · Esc Back",
             id="history-hint", markup=False,
         )
 

@@ -17,11 +17,13 @@ from lecture_util.configuration import (
 )
 from lecture_util.errors import LectureUtilError
 from lecture_util.form_ui import CodexModelPicker, FormApp, TranscriptionSettings
+from lecture_util.navigation import VIM_BINDINGS, VimNavigation
 from lecture_util.vault import discover_courses, validate_semester_start
 
 
-class ConfirmVaultVideoScreen(ModalScreen[bool]):
+class ConfirmVaultVideoScreen(VimNavigation, ModalScreen[bool]):
     BINDINGS = [
+        *VIM_BINDINGS,
         Binding("ctrl+s", "confirm", "Store videos in Vault", priority=True),
         Binding("escape", "cancel", "Cancel", priority=True),
     ]

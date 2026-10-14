@@ -17,6 +17,7 @@ from textual.widgets import Button, Checkbox, Collapsible, Input, Label, OptionL
 
 from lecture_util.codex_models import ModelCatalog, discover_models
 from lecture_util.errors import LectureUtilError
+from lecture_util.navigation import VIM_BINDINGS, VimNavigation
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -98,8 +99,9 @@ class CodexModelPicker(Vertical):
         self.query_one("#effort-status", Label).update(status)
 
 
-class FormApp(App[T]):
+class FormApp(VimNavigation, App[T]):
     BINDINGS = [
+        *VIM_BINDINGS,
         Binding("space", "select_option", show=False, priority=True),
         Binding("up", "leave_select('previous')", show=False, priority=True),
         Binding("down", "leave_select('next')", show=False, priority=True),
@@ -167,7 +169,10 @@ class FormApp(App[T]):
             yield Button(self.submit_label, id=self.submit_id, variant="primary")
 
     def key_hint(self) -> str:
-        return f"Tab Navigate · {self.shortcut} {self.submit_label} · Esc Cancel"
+        return (
+            f"Tab / j/k Navigate · Ctrl+J/K Fields · "
+            f"{self.shortcut} {self.submit_label} · Esc Cancel"
+        )
 
     def compose_extra_actions(self) -> ComposeResult:
         yield from ()
@@ -177,6 +182,12 @@ class FormApp(App[T]):
 
     def on_mount(self) -> None:
         self.screen.set_class(self.size.width < 100, "compact")
+        # Select overlays consume printable keys before ancestor bindings,
+        # so install Vim cursor bindings directly on each option list.
+        for select in self.query(Select):
+            for options in select.query(OptionList):
+                options._bindings.bind("j", "cursor_down", show=False, priority=True)
+                options._bindings.bind("k", "cursor_up", show=False, priority=True)
         self.refresh_preview()
 
     def on_resize(self, event: events.Resize) -> None:

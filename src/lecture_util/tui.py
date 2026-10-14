@@ -169,7 +169,10 @@ class LectureSetupApp(FormApp[RunOptions | HistoryAction]):
             self.action_history()
 
     def key_hint(self) -> str:
-        return f"Tab Navigate · {self.shortcut} {self.submit_label} · Ctrl+O History · Esc Cancel"
+        return (
+            f"Tab / j/k Navigate · Ctrl+J/K Fields · "
+            f"{self.shortcut} {self.submit_label} · Ctrl+O History · Esc Cancel"
+        )
 
     def compose_extra_actions(self) -> ComposeResult:
         yield Button("History", id="history")
