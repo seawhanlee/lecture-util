@@ -111,3 +111,38 @@ def test_material_json_rejects_non_object_response():
     with patch.object(CodexSummarizer, "_request", return_value="[]"):
         with pytest.raises(LectureUtilError, match="invalid material JSON"):
             CodexSummarizer().generate_json("Read PDFs", {})
+
+
+def test_empty_summary_is_returned_for_validation_and_repair(tmp_path):
+    transcript = tmp_path / "transcript.md"
+    transcript.write_text("Lecture")
+
+    def run(argv, **kwargs):
+        output = Path(argv[argv.index("--output-last-message") + 1])
+        output.write_text(" \n")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    with (patch("lecture_util.summarizers._require_cli", return_value="codex"),
+          patch("lecture_util.summarizers.subprocess.run", side_effect=run)):
+        assert CodexSummarizer().generate("Instructions", "Summarize", transcript) == ""
+
+
+def test_empty_material_summary_allows_repair_but_empty_json_is_an_error(tmp_path):
+    from lecture_util.errors import LectureUtilError
+    from lecture_util.materials import MaterialContext
+
+    transcript = tmp_path / "transcript.md"
+    transcript.write_text("Lecture")
+
+    def start(argv, **kwargs):
+        output = Path(argv[argv.index("--output-last-message") + 1])
+        output.write_text(" \n")
+        return Mock(returncode=0, communicate=Mock(return_value=("", "")))
+
+    with (patch("lecture_util.summarizers._require_cli", return_value="codex"),
+          patch("lecture_util.summarizers.subprocess.Popen", side_effect=start)):
+        summarizer = CodexSummarizer()
+        assert summarizer.generate("Instructions", "Summarize", transcript,
+                                   materials=MaterialContext([], [], [], "fp")) == ""
+        with pytest.raises(LectureUtilError, match="empty response"):
+            summarizer.generate_json("Read PDFs", {})

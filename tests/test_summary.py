@@ -4,18 +4,23 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import pytest
+
+from lecture_util.errors import LectureUtilError
 from lecture_util.models import Segment, Transcript
 from lecture_util.progress import ProgressEvent
 from lecture_util.state import create_workspace
 from lecture_util.summary import (
+    CORRECTION_DEVELOPER_PROMPT,
     DEFAULT_PROMPT,
     DEVELOPER_PROMPT,
     summarize_transcript,
     summary_fingerprint,
     summary_stage,
 )
+from lecture_util.transcription import save_transcript
 
 
 @dataclass
@@ -206,3 +211,142 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.fixture
+def summary_workspace(tmp_path):
+    paths, state = create_workspace("https://example.com/index.m3u8", tmp_path)
+    transcript = Transcript.from_dict(sample_transcript(2).to_dict())
+    save_transcript(transcript, paths.transcript_json, paths.transcript_markdown,
+                    paths.transcript_srt)
+    return paths, state, transcript
+
+
+@pytest.mark.parametrize("draft", ["[[broken", "", "本文\n$$\nx"])
+def test_summary_corrects_once_using_same_model_and_source(summary_workspace, draft):
+    import json
+    paths, state, transcript = summary_workspace
+    summarizer = FakeSummarizer(reasoning_effort="high")
+    summarizer.generate = Mock(side_effect=[draft, "# 그대로\n[[#그대로|링크]]"])
+    events = []
+    result = summary_stage(transcript, paths.transcript_markdown, paths.summary,
+                           state, summarizer, prompt="사용자 강조점", progress=events.append)
+    assert result == "# 그대로\n[[#그대로|링크]]\n"
+    assert paths.summary.read_text() == result
+    assert state.stage_complete("summary")
+    assert summarizer.generate.call_count == 2
+    first, correction = summarizer.generate.call_args_list
+    assert first.args[0] == DEVELOPER_PROMPT
+    assert correction.args[0] == CORRECTION_DEVELOPER_PROMPT
+    assert correction.args[2] == paths.transcript_markdown
+    request = json.loads(correction.args[1])
+    assert request["draft"] == draft
+    assert request["original_request"] == "사용자 강조점"
+    assert request["issues"][0]["line"] in {1, 2}
+    assert any(event.status == "warning" for event in events)
+    assert summarizer.model == "fake-model" and summarizer.reasoning_effort == "high"
+
+
+@pytest.mark.parametrize("failure", ["[[still broken", LectureUtilError("Model failed"),
+                                    KeyboardInterrupt()])
+def test_failed_correction_preserves_previous_file_and_stages(summary_workspace, failure):
+    paths, state, transcript = summary_workspace
+    paths.summary.write_text("Previous result")
+    state.complete_stage("transcription", sha256=state.digest(paths.transcript_json))
+    before = dict(state.data["stages"]["transcription"])
+    summarizer = FakeSummarizer()
+    summarizer.generate = Mock(side_effect=["[[broken", failure])
+    expected = KeyboardInterrupt if isinstance(failure, KeyboardInterrupt) else LectureUtilError
+    with pytest.raises(expected) as caught:
+        summary_stage(transcript, paths.transcript_markdown, paths.summary, state, summarizer)
+    if isinstance(failure, str):
+        assert "line 1 [unclosed_wikilink]" in str(caught.value)
+    assert summarizer.generate.call_count == 2
+    assert paths.summary.read_text() == "Previous result"
+    assert state.data["stages"]["summary"]["status"] == "failed"
+    assert state.data["stages"]["transcription"] == before
+
+
+@pytest.mark.parametrize("fixed", [True, False])
+def test_invalid_legacy_cache_is_corrected_once(summary_workspace, fixed):
+    from lecture_util.pipeline import summary_cached
+    paths, state, transcript = summary_workspace
+    summarizer = FakeSummarizer()
+    paths.summary.write_text("[[legacy broken")
+    state.complete_stage("summary", fingerprint=summary_fingerprint(
+        transcript, paths.transcript_markdown, summarizer, DEFAULT_PROMPT,
+    ), sha256=state.digest(paths.summary))
+    assert not summary_cached(paths, state, summarizer, DEFAULT_PROMPT)
+    summarizer.generate = Mock(return_value="[[fixed]]" if fixed else "[[still broken")
+    if fixed:
+        summary_stage(transcript, paths.transcript_markdown, paths.summary, state, summarizer)
+        assert paths.summary.read_text() == "[[fixed]]\n"
+        assert summary_cached(paths, state, summarizer, DEFAULT_PROMPT)
+        summary_stage(transcript, paths.transcript_markdown, paths.summary, state, summarizer)
+    else:
+        with pytest.raises(LectureUtilError, match="after one correction"):
+            summary_stage(transcript, paths.transcript_markdown, paths.summary, state, summarizer)
+        assert paths.summary.read_text() == "[[legacy broken"
+    summarizer.generate.assert_called_once()
+    assert summarizer.generate.call_args.args[0] == CORRECTION_DEVELOPER_PROMPT
+
+
+def test_invalid_new_summary_is_never_written(summary_workspace):
+    paths, state, transcript = summary_workspace
+    summarizer = FakeSummarizer()
+    summarizer.generate = Mock(return_value="[[broken")
+    with pytest.raises(LectureUtilError):
+        summary_stage(transcript, paths.transcript_markdown, paths.summary, state, summarizer)
+    assert not paths.summary.exists()
+
+
+def test_failed_validation_blocks_publication_and_resume_reuses_transcription(tmp_path, monkeypatch):
+    from io import StringIO
+
+    from rich.console import Console
+
+    from lecture_util.models import LecturePaths, LectureSource, RunOptions
+    from lecture_util.pipeline import execute_run
+    from lecture_util.recovery import load_request
+    from lecture_util.state import RunState, file_digest, lecture_id
+    from lecture_util.vault import COURSES_DIRECTORY
+
+    vault = tmp_path / "vault"
+    notes = vault / COURSES_DIRECTORY / "Course" / "Lectures"
+    notes.mkdir(parents=True)
+    media = tmp_path / "lecture.wav"
+    media.write_bytes(b"original recording")
+    source = LectureSource("audio", str(media), file_digest(media))
+    options = RunOptions(str(media), "Course", "2026-09-07", "Title", "fake-model",
+                         None, "large-v3", "ko", "cpu", DEFAULT_PROMPT, False,
+                         semester_start="2026-08-31", source=source)
+    transcript = Transcript.from_dict(sample_transcript(2).to_dict())
+    transcribe = Mock(return_value=transcript)
+    extract = Mock(side_effect=lambda source, target: target.write_bytes(b"prepared audio"))
+    summarizer = FakeSummarizer()
+    summarizer.generate = Mock(side_effect=["[[broken", "[[still broken", "# Valid OFM"])
+    monkeypatch.setattr("lecture_util.pipeline.CodexSummarizer", lambda **kwargs: summarizer)
+    monkeypatch.setattr("lecture_util.pipeline.preflight_transcription", Mock())
+    monkeypatch.setattr("lecture_util.pipeline.transcribe_audio", transcribe)
+    monkeypatch.setattr("lecture_util.pipeline.extract_audio", extract)
+    monkeypatch.setattr("lecture_util.media.require_executable", lambda name: name)
+    monkeypatch.setattr("lecture_util.recovery.resolve_source", lambda url: source)
+    cache = tmp_path / "cache"
+    videos = tmp_path / "videos"
+    console = Console(file=StringIO(), width=120)
+    with pytest.raises(LectureUtilError, match="OFM validation failed"):
+        execute_run(options, vault_root=vault, video_root=videos, cache_root=cache,
+                    console=console)
+    paths = LecturePaths(cache / f"lecture-{lecture_id(source.cache_key)}")
+    assert not paths.summary.exists()
+    assert not list(notes.rglob("*.md"))
+    assert not (paths.root / "publication.json").exists()
+    assert RunState(paths, read_only=True).data["stages"]["summary"]["status"] == "failed"
+    resumed, saved_vault, saved_videos = load_request(paths.root)
+    execute_run(resumed, vault_root=saved_vault, video_root=saved_videos,
+                cache_root=cache, console=console)
+    transcribe.assert_called_once()
+    extract.assert_called_once()
+    assert summarizer.generate.call_count == 3
+    assert len(list(notes.rglob("*.md"))) == 2
+    assert media.read_bytes() == b"original recording"

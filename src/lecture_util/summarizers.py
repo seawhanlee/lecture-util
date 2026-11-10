@@ -73,10 +73,10 @@ class CodexSummarizer:
                 f"{developer_prompt}\n\nRead the entire lecture transcript at "
                 + json.dumps(str(transcript_path.resolve()), ensure_ascii=False)
                 + ". Read the selected material pages and use their diagrams and formulas as evidence. "
-                "Do not modify the transcript or original PDFs. Return only the requested Markdown.\n"
+                "Do not modify the transcript or original PDFs. Return only the requested Obsidian Flavored Markdown.\n"
                 + materials.prompt() + "\n\n" + user_prompt
             )
-            return self._request(prompt)
+            return self._request(prompt, allow_empty=True)
         codex = _require_cli("codex")
         if not transcript_path.is_file():
             raise LectureUtilError(f"Transcript file does not exist: {transcript_path}")
@@ -119,7 +119,8 @@ class CodexSummarizer:
                 content = output.read_text(encoding="utf-8")
             except OSError as error:
                 raise LectureUtilError(f"Codex did not create its response file: {error}") from error
-        return _require_output(content, self.name)
+        # The summary validator owns empty-output handling and its one repair attempt.
+        return content.strip()
 
     def generate_json(self, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
         content = self._request(prompt, schema=schema)
@@ -131,7 +132,8 @@ class CodexSummarizer:
         except ValueError as error:
             raise LectureUtilError(f"Codex returned invalid material JSON: {error}") from error
 
-    def _request(self, prompt: str, *, schema: dict[str, Any] | None = None) -> str:
+    def _request(self, prompt: str, *, schema: dict[str, Any] | None = None,
+                 allow_empty: bool = False) -> str:
         """Material reads may render PDFs only in a disposable workspace."""
         codex = _require_cli("codex")
         with tempfile.TemporaryDirectory(prefix="lecture-util-materials-") as directory:
@@ -175,6 +177,7 @@ class CodexSummarizer:
             if process.returncode != 0:
                 raise LectureUtilError(f"Codex material processing failed: {stderr.strip()[-2000:]}")
             try:
-                return _require_output(output.read_text(encoding="utf-8"), self.name)
+                content = output.read_text(encoding="utf-8")
+                return content.strip() if allow_empty else _require_output(content, self.name)
             except OSError as error:
                 raise LectureUtilError(f"Codex did not create its response file: {error}") from error

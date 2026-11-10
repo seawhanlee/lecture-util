@@ -206,6 +206,24 @@ def test_material_change_invalidates_only_summary_inputs(setup, tmp_path):
     assert codex.summaries[-1][2] is None
 
 
+def test_summary_correction_preserves_material_context(setup, tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    _, directory, _ = setup
+    files = discover_materials([str(directory)])
+    paths, state = workspace(tmp_path)
+    codex = FakeCodex()
+    generate = Mock(side_effect=["[[broken", "### Conservation\n(교재.pdf, PDF p.1)"])
+    monkeypatch.setattr(codex, "generate", generate)
+    transcript = Transcript("en", 10, "test", "test", "test", [])
+    summary_stage(transcript, paths.transcript_markdown, paths.summary, state, codex,
+                  materials_files=files)
+    assert generate.call_count == 2
+    first, repair = generate.call_args_list
+    assert repair.kwargs["materials"] is first.kwargs["materials"]
+    assert repair.kwargs["materials"].files == files
+    assert repair.args[2] == first.args[2] == paths.transcript_markdown
+
+
 def test_model_and_effort_changes_reanalyze_materials(setup, tmp_path):
     _, directory, _ = setup
     files = discover_materials([str(directory)])

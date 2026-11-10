@@ -623,6 +623,7 @@ def _execute_run_locked(
 def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer, prompt: str,
                    *, materials_files: list[dict] | None = None) -> bool:
     from lecture_util.summary import summary_fingerprint
+    from lecture_util.summary_validation import validate_summary
     from lecture_util.transcription import load_transcript
     stage = state.data.get("stages", {}).get("summary", {})
     if not (stage.get("status") == "complete" and paths.transcript_json.is_file()
@@ -644,7 +645,8 @@ def summary_cached(paths: LecturePaths, state: RunState, summarizer: Summarizer,
         transcript, paths.transcript_markdown, summarizer, prompt,
         materials_files=materials_files,
         materials_fingerprint=material_stage.get("context_fingerprint") if materials_files else None,
-    ) and stage.get("sha256") == state.digest(paths.summary))
+    ) and stage.get("sha256") == state.digest(paths.summary)
+        and not validate_summary(paths.summary.read_text(encoding="utf-8")))
 
 
 def cached_preparation(paths: LecturePaths, state: RunState, options: TranscriptionOptions,
